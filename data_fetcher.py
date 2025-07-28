@@ -160,7 +160,7 @@ def build_demand_profile():
     return demand
 
 def get_model():
-    """Main function returning supply and demand model"""
+    """Main function with improved date range handling to fix zero supply issue"""
     sup = build_supply_profile()
     dem = build_demand_profile()
 
@@ -170,15 +170,64 @@ def get_model():
         return sup, dem
 
     if sup.empty:
+        print("[WARNING] No supply data - creating zero supply model")
         dem['TJ_Available'] = 0
         dem['Shortfall'] = dem['TJ_Available'] - dem['TJ_Demand']
         return sup, dem
 
-    # Aggregate total daily supply and merge with demand
-    total_supply = sup.groupby("GasDay")["TJ_Available"].sum().reset_index()
-    model = dem.merge(total_supply, on="GasDay", how="left")
+    # Debug date ranges
+    print(f"[DEBUG] Supply dates: {sup['GasDay'].min()} to {sup['GasDay'].max()}")
+    print(f"[DEBUG] Demand dates: {dem['GasDay'].min()} to {dem['GasDay'].max()}")
+
+    # Get demand date range to focus supply data
+    demand_start = dem['GasDay'].min()
+    demand_end = dem['GasDay'].max()
+    
+    # Filter supply to demand date range PLUS extend to cover gaps
+    extended_start = demand_start - pd.Timedelta(days=7)  # Look back 7 days
+    extended_end = demand_end + pd.Timedelta(days=365)    # Look forward 1 year
+    
+    relevant_supply = sup[
+        (sup['GasDay'] >= extended_start) & 
+        (sup['GasDay'] <= extended_end)
+    ]
+    
+    print(f"[DEBUG] Filtered supply to relevant dates: {relevant_supply.shape}")
+    
+    if relevant_supply.empty:
+        print("[WARNING] No supply data in demand date range - using latest available supply")
+        # Use the most recent supply data available
+        latest_supply_date = sup['GasDay'].max()
+        latest_supply = sup[sup['GasDay'] == latest_supply_date]
+        
+        # Apply latest supply to all demand dates
+        supply_total = latest_supply['TJ_Available'].sum()
+        dem['TJ_Available'] = supply_total
+        dem['Shortfall'] = dem['TJ_Available'] - dem['TJ_Demand']
+        
+        print(f"[DEBUG] Used latest supply {supply_total} TJ for all demand dates")
+        return sup, dem
+
+    # Aggregate daily supply from filtered data
+    total_supply = relevant_supply.groupby("GasDay")["TJ_Available"].sum().reset_index()
+    print(f"[DEBUG] Daily supply aggregation: {total_supply.shape}, max: {total_supply['TJ_Available'].max()}")
+    
+    # Forward-fill supply data to cover gaps
+    # Create complete date range for demand period
+    all_dates = pd.DataFrame({
+        'GasDay': pd.date_range(demand_start, demand_end, freq='D')
+    })
+    
+    # Merge and forward-fill supply
+    supply_filled = all_dates.merge(total_supply, on='GasDay', how='left')
+    supply_filled['TJ_Available'] = supply_filled['TJ_Available'].fillna(method='ffill')
+    supply_filled['TJ_Available'] = supply_filled['TJ_Available'].fillna(method='bfill')
+    supply_filled['TJ_Available'] = supply_filled['TJ_Available'].fillna(0)
+    
+    # Merge with demand
+    model = dem.merge(supply_filled, on="GasDay", how="left")
     model['TJ_Available'] = model['TJ_Available'].fillna(0)
     model["Shortfall"] = model["TJ_Available"] - model["TJ_Demand"]
     
-    print(f"[DEBUG] Final model: {model.shape}, columns: {list(model.columns)}")
+    print(f"[DEBUG] Final model: {model.shape}, avg supply: {model['TJ_Available'].mean():.1f}")
     return sup, model
