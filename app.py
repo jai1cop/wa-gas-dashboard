@@ -1157,7 +1157,7 @@ def display_integrated_main_dashboard():
         with control_col3:
             show_smoothing = st.checkbox("📈 Apply Data Smoothing", value=True)
         
-        if chart_type == "Integrated Supply vs Demand":
+    if chart_type == "Integrated Supply vs Demand":
         st.markdown("### 🌍 Select Facilities by Updated Zones:")
             
             regions = {}
