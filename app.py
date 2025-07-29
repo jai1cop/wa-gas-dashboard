@@ -876,11 +876,11 @@ def display_command_center():
         """, unsafe_allow_html=True)
     
     with col4:
-        # Market Balance
+        # Market Balance - CORRECTED INDENTATION
         production_df = fetch_production_facility_data()
         demand_df = fetch_market_demand_data()
-          
-       if not production_df.empty and not demand_df.empty:
+        
+        if not production_df.empty and not demand_df.empty:
             today_supply = production_df['Total_Supply'].iloc[-1]
             today_demand = demand_df['Market_Demand'].iloc[-1]
             today_balance = today_supply - today_demand
