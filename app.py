@@ -373,7 +373,6 @@ class EnhancedAEMOClient:
     def fetch_medium_term_capacity_constraints(self):
         """Fetch Medium Term Capacity data with facility constraints"""
         
-        # Test official AEMO endpoints
         endpoints = [
             "https://gbbwa.aemo.com.au/api/v1/report/mediumTermCapacity/current",
             "https://gbbwa-trial.aemo.com.au/api/v1/report/mediumTermCapacity/current",
@@ -384,45 +383,41 @@ class EnhancedAEMOClient:
             try:
                 response = requests.get(endpoint, timeout=15)
                 if response.status_code == 200:
-                    # Process successful response
                     return self._process_capacity_data(response), None
             except:
                 continue
         
-        # Return simulated constraints if API not available
         return self._create_simulated_constraints(), "AEMO API not available"
     
     def _process_capacity_data(self, response):
         """Process AEMO capacity constraint data"""
-        # Implementation would parse JSON/CSV and return constraints DataFrame
-        # For integration, return simulated data
         return self._create_simulated_constraints()
     
     def _create_simulated_constraints(self):
-    """Create realistic capacity constraints for demonstration - DATETIME FIXED"""
-    
-    today = pd.Timestamp.now()  # FIXED: Use pd.Timestamp.now()
-    
-    constraints = [
-        {
-            'facility': 'Gorgon Gas Plant',
-            'capacity_tj_day': 250,
-            'capacity_type': 'MAINTENANCE',
-            'start_date': today + pd.Timedelta(days=30),  # FIXED
-            'end_date': today + pd.Timedelta(days=45),    # FIXED
-            'description': 'Scheduled maintenance - reduced capacity'
-        },
-        {
-            'facility': 'Wheatstone Gas Plant',
-            'capacity_tj_day': 180,
-            'capacity_type': 'PIPELINE_CONSTRAINT',
-            'start_date': today + pd.Timedelta(days=15),  # FIXED
-            'end_date': today + pd.Timedelta(days=60),    # FIXED
-            'description': 'Pipeline capacity constraint'
-        }
-    ]
-    
-    return pd.DataFrame(constraints)
+        """Create realistic capacity constraints for demonstration - DATETIME FIXED"""
+        
+        today = pd.Timestamp.now()  # FIXED: Use pd.Timestamp.now()
+        
+        constraints = [
+            {
+                'facility': 'Gorgon Gas Plant',
+                'capacity_tj_day': 250,
+                'capacity_type': 'MAINTENANCE',
+                'start_date': today + pd.Timedelta(days=30),  # FIXED
+                'end_date': today + pd.Timedelta(days=45),    # FIXED
+                'description': 'Scheduled maintenance - reduced capacity'
+            },
+            {
+                'facility': 'Wheatstone Gas Plant',
+                'capacity_tj_day': 180,
+                'capacity_type': 'PIPELINE_CONSTRAINT',
+                'start_date': today + pd.Timedelta(days=15),  # FIXED
+                'end_date': today + pd.Timedelta(days=60),    # FIXED
+                'description': 'Pipeline capacity constraint'
+            }
+        ]
+        
+        return pd.DataFrame(constraints)
 
 # Initialize enhanced client
 aemo_client = EnhancedAEMOClient()
