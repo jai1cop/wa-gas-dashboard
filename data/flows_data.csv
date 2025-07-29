@@ -1,1 +1,2 @@
-Facility,Date,Flow_TJ,last_updated
+debug_status,timestamp,url_tested,scraper_version
+no_data_found,2025-07-29T04:46:05.230251,https://gbbwa.aemo.com.au/#flows,enhanced_debug_v1.0

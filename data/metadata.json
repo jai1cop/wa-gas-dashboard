@@ -1,0 +1,16 @@
+{
+  "scrape_timestamp": "2025-07-29T04:46:05.230251",
+  "records_by_type": {
+    "flows": 0,
+    "capacity": 0,
+    "storage": 0
+  },
+  "total_records": 0,
+  "status": "no_data_extracted",
+  "urls_tested": {
+    "flows": "https://gbbwa.aemo.com.au/#flows",
+    "capacity": "https://gbbwa.aemo.com.au/#reports/mediumTermCapacity",
+    "storage": "https://gbbwa.aemo.com.au/#reports/actualFlow"
+  },
+  "scraper_version": "enhanced_debug_v1.0"
+}
