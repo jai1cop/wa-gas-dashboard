@@ -5,6 +5,7 @@ import logging
 import json
 from typing import Optional, Dict, Any
 import streamlit as st
+from io import StringIO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ class WA_GBB_API:
         'large_user_consumption': 'largeUserConsumption',
         'linepack_adequacy': 'linepackCapacityAdequacy',
         'trucked_gas': 'truckedGas',
-        'storage': 'storageCapacity'  # If available
+        'storage': 'storageCapacity'
     }
     
     def __init__(self):
@@ -74,7 +75,7 @@ class WA_GBB_API:
             
             if format_type == 'csv':
                 # Parse CSV directly into DataFrame
-                df = pd.read_csv(pd.StringIO(response.text))
+                df = pd.read_csv(StringIO(response.text))
                 logger.info(f"✅ {report_name}: {len(df)} records loaded")
                 
                 # Add metadata
@@ -165,4 +166,68 @@ def get_large_user_consumption(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get large user consumption data"""
     return api_client.fetch_report('large_user_consumption', gas_date) or pd.DataFrame()
 
+@st.cache_data(ttl=3600)
+def get_linepack_adequacy(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get linepack capacity adequacy data"""
+    return api_client.fetch_report('linepack_adequacy', gas_date) or pd.DataFrame()
 
+@st.cache_data(ttl=1800)
+def get_trucked_gas(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get trucked gas data"""
+    return api_client.fetch_report('trucked_gas', gas_date) or pd.DataFrame()
+
+def get_all_current_data() -> Dict[str, pd.DataFrame]:
+    """
+    Get all current/latest data from WA GBB API
+    Returns dictionary with all available datasets
+    """
+    logger.info("🚀 Fetching all current WA GBB data via API...")
+    
+    datasets = {
+        'actual_flows': get_actual_flows(),
+        'capacity_outlook': get_capacity_outlook(),
+        'medium_term_capacity': get_medium_term_capacity(),
+        'forecast_flows': get_forecast_flows(),
+        'end_user_consumption': get_end_user_consumption(),
+        'large_user_consumption': get_large_user_consumption(),
+        'linepack_adequacy': get_linepack_adequacy(),
+        'trucked_gas': get_trucked_gas()
+    }
+    
+    # Log summary
+    total_records = sum(len(df) for df in datasets.values() if not df.empty)
+    logger.info(f"📊 Total records loaded: {total_records}")
+    
+    for name, df in datasets.items():
+        if not df.empty:
+            logger.info(f"   - {name}: {len(df)} records")
+        else:
+            logger.warning(f"   - {name}: No data available")
+    
+    return datasets
+
+# Legacy function names for compatibility
+def get_daily_flows(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Legacy function - maps to actual flows"""
+    return get_actual_flows(gas_date)
+
+def get_medium_term_constraints(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Legacy function - maps to medium term capacity"""
+    return get_medium_term_capacity(gas_date)
+
+def get_storage_history(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Legacy function - try to get storage data"""
+    # Note: Storage data endpoint may not exist, fallback to capacity data
+    storage_df = api_client.fetch_report('storage', gas_date)
+    if storage_df is None or storage_df.empty:
+        logger.info("Storage data not available, returning capacity outlook as alternative")
+        return get_capacity_outlook(gas_date)
+    return storage_df
+
+def get_all_gbb_data():
+    """Legacy function for backwards compatibility"""
+    flows_df = get_actual_flows()
+    capacity_df = get_medium_term_capacity()
+    storage_df = get_capacity_outlook()  # Use capacity as storage alternative
+    
+    return flows_df, capacity_df, storage_df
