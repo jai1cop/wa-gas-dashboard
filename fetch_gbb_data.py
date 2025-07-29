@@ -39,7 +39,7 @@ class WA_GBB_API:
         })
     
     def fetch_report(self, report_name: str, gas_date: Optional[str] = None, 
-                    format_type: str = 'csv') -> Optional[pd.DataFrame]:
+                    format_type: str = 'csv') -> pd.DataFrame:
         """
         Fetch a report from the WA GBB API
         
@@ -49,12 +49,12 @@ class WA_GBB_API:
             format_type: 'csv' or 'json'
         
         Returns:
-            DataFrame with the report data or None if failed
+            DataFrame with the report data or empty DataFrame if failed
         """
         
         if report_name not in self.REPORTS:
             logger.error(f"Unknown report: {report_name}. Available: {list(self.REPORTS.keys())}")
-            return None
+            return pd.DataFrame()
         
         api_report_name = self.REPORTS[report_name]
         
@@ -103,34 +103,10 @@ class WA_GBB_API:
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"❌ API request failed for {report_name}: {e}")
-            return None
+            return pd.DataFrame()
         except Exception as e:
             logger.error(f"❌ Error parsing {report_name} data: {e}")
-            return None
-    
-    def get_available_dates(self, report_name: str) -> list:
-        """
-        Get list of available dates for a report (if supported by API)
-        """
-        if report_name not in self.REPORTS:
-            return []
-        
-        api_report_name = self.REPORTS[report_name]
-        endpoint = f"{self.BASE_URL}/{api_report_name}"
-        
-        try:
-            response = self.session.get(endpoint, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Extract dates from API response (format may vary)
-            if isinstance(data, dict) and 'available_dates' in data:
-                return data['available_dates']
-            
-        except Exception as e:
-            logger.debug(f"Could not fetch available dates for {report_name}: {e}")
-        
-        return []
+            return pd.DataFrame()
 
 # Initialize API client
 api_client = WA_GBB_API()
@@ -213,29 +189,3 @@ def get_all_current_data() -> Dict[str, pd.DataFrame]:
             logger.warning(f"   - {name}: No data available")
     
     return datasets
-
-# Legacy function names for compatibility
-def get_daily_flows(gas_date: Optional[str] = None) -> pd.DataFrame:
-    """Legacy function - maps to actual flows"""
-    return get_actual_flows(gas_date)
-
-def get_medium_term_constraints(gas_date: Optional[str] = None) -> pd.DataFrame:
-    """Legacy function - maps to medium term capacity"""
-    return get_medium_term_capacity(gas_date)
-
-def get_storage_history(gas_date: Optional[str] = None) -> pd.DataFrame:
-    """Legacy function - try to get storage data"""
-    # Note: Storage data endpoint may not exist, fallback to capacity data
-    storage_df = api_client.fetch_report('storage', gas_date)
-    if storage_df is None or storage_df.empty:
-        logger.info("Storage data not available, returning capacity outlook as alternative")
-        return get_capacity_outlook(gas_date)
-    return storage_df
-
-def get_all_gbb_data():
-    """Legacy function for backwards compatibility"""
-    flows_df = get_actual_flows()
-    capacity_df = get_medium_term_capacity()
-    storage_df = get_capacity_outlook()  # Use capacity as storage alternative
-    
-    return flows_df, capacity_df, storage_df
