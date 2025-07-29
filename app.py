@@ -399,30 +399,30 @@ class EnhancedAEMOClient:
         return self._create_simulated_constraints()
     
     def _create_simulated_constraints(self):
-        """Create realistic capacity constraints for demonstration - DATETIME FIXED"""
-        
-        today = datetime.now()
-        
-        constraints = [
-            {
-                'facility': 'Gorgon Gas Plant',
-                'capacity_tj_day': 250,  # Reduced from 300
-                'capacity_type': 'MAINTENANCE',
-                'start_date': pd.Timestamp(today) + pd.Timedelta(days=30),  # FIXED
-                'end_date': pd.Timestamp(today) + pd.Timedelta(days=45),    # FIXED
-                'description': 'Scheduled maintenance - reduced capacity'
-            },
-            {
-                'facility': 'Wheatstone Gas Plant',
-                'capacity_tj_day': 180,  # Reduced from 230
-                'capacity_type': 'PIPELINE_CONSTRAINT',
-                'start_date': pd.Timestamp(today) + pd.Timedelta(days=15),  # FIXED
-                'end_date': pd.Timestamp(today) + pd.Timedelta(days=60),    # FIXED
-                'description': 'Pipeline capacity constraint'
-            }
-        ]
-        
-        return pd.DataFrame(constraints)
+    """Create realistic capacity constraints for demonstration - DATETIME FIXED"""
+    
+    today = pd.Timestamp.now()  # FIXED: Use pd.Timestamp.now()
+    
+    constraints = [
+        {
+            'facility': 'Gorgon Gas Plant',
+            'capacity_tj_day': 250,
+            'capacity_type': 'MAINTENANCE',
+            'start_date': today + pd.Timedelta(days=30),  # FIXED
+            'end_date': today + pd.Timedelta(days=45),    # FIXED
+            'description': 'Scheduled maintenance - reduced capacity'
+        },
+        {
+            'facility': 'Wheatstone Gas Plant',
+            'capacity_tj_day': 180,
+            'capacity_type': 'PIPELINE_CONSTRAINT',
+            'start_date': today + pd.Timedelta(days=15),  # FIXED
+            'end_date': today + pd.Timedelta(days=60),    # FIXED
+            'description': 'Pipeline capacity constraint'
+        }
+    ]
+    
+    return pd.DataFrame(constraints)
 
 # Initialize enhanced client
 aemo_client = EnhancedAEMOClient()
@@ -435,9 +435,9 @@ aemo_client = EnhancedAEMOClient()
 def generate_5_year_median_demand():
     """Generate sophisticated 5-year median demand with smoothing - DATETIME FIXED"""
     
-    # Create 5 years of historical data
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=5*365)
+    # Create 5 years of historical data - FIXED
+    end_date = pd.Timestamp.now()  # Use pd.Timestamp.now() instead of datetime.now()
+    start_date = end_date - pd.Timedelta(days=5*365)  # Use pd.Timedelta
     all_dates = pd.date_range(start=start_date, end=end_date, freq='D')
     
     # WA-specific demand parameters
@@ -503,9 +503,9 @@ def generate_5_year_median_demand():
         window=7, center=True, min_periods=1
     ).mean()
     
-    # Create current period demand - DATETIME FIXED
-    current_year_start = pd.Timestamp(datetime(datetime.now().year, 1, 1))
-    current_year_end = pd.Timestamp(datetime.now()) + pd.Timedelta(days=90)  # FIXED
+     # Create current period demand - DATETIME FIXED
+    current_year_start = pd.Timestamp(pd.Timestamp.now().year, 1, 1)
+    current_year_end = pd.Timestamp.now() + pd.Timedelta(days=90)  # FIXED
     current_dates = pd.date_range(start=current_year_start, end=current_year_end, freq='D')
     
     current_demand = []
@@ -533,8 +533,8 @@ def generate_5_year_median_demand():
 def generate_production_with_capacity_constraints():
     """Generate production data with Medium Term Capacity constraints applied - DATETIME FIXED"""
     
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=365)
+    end_date = pd.Timestamp.now()  # FIXED
+    start_date = end_date - pd.Timedelta(days=365)  # FIXED
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
     
     # Get capacity constraints
