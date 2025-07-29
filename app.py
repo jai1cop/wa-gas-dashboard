@@ -386,9 +386,8 @@ def check_data_source_availability():
 
 @st.cache_data(ttl=3600)
 def fetch_medium_term_capacity_data_csv_first():
-    """Enhanced capacity data fetching - CSV-first approach"""
+    """Enhanced capacity data fetching - CSV-first with robust error handling"""
     
-    # CSV endpoints (often more accessible than JSON APIs)
     csv_endpoints = [
         "https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current.csv",
         "https://aemo.com.au/aemo/data/wa/gbb/capacity/current.csv",
@@ -397,14 +396,13 @@ def fetch_medium_term_capacity_data_csv_first():
         "https://aemo.com.au/-/media/files/gas/gbb/data/medium-term-capacity-outlook.csv"
     ]
     
-    # JSON endpoints (fallback)
     json_endpoints = [
         "https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current",
         "https://aemo.com.au/api/v1/report/mediumTermCapacity/current"
     ]
     
-    # Try CSV endpoints first
-    st.info("🔄 Trying CSV endpoints for Medium Term Capacity data...")
+    # Try CSV endpoints with enhanced error handling
+    st.info("🔄 Trying CSV endpoints with robust parsing...")
     
     for endpoint in csv_endpoints:
         try:
@@ -413,12 +411,13 @@ def fetch_medium_term_capacity_data_csv_first():
             
             if data and not error and content_type == 'csv':
                 try:
-                    capacity_df = process_medium_term_capacity_csv(data)
+                    # Use robust CSV processing
+                    capacity_df = process_medium_term_capacity_csv_robust(data)
                     if not capacity_df.empty:
                         st.success(f"✅ Successfully loaded capacity data from CSV endpoint")
                         return capacity_df, None
                 except Exception as e:
-                    st.warning(f"⚠️ CSV processing failed: {e}")
+                    st.warning(f"⚠️ CSV processing failed for {endpoint}: {e}")
                     continue
                     
         except Exception as e:
@@ -451,161 +450,332 @@ def fetch_medium_term_capacity_data_csv_first():
     st.info("📊 Using GSOO 2024 static capacity values (all API endpoints unavailable)")
     return create_fallback_capacity_data(), "All endpoints unavailable"
 
-def process_medium_term_capacity_csv(csv_data):
-    """Enhanced CSV processing for Medium Term Capacity data"""
+def process_medium_term_capacity_csv_robust(csv_data):
+    """Enhanced CSV processing with robust error handling for malformed data"""
     
     try:
-        # Parse CSV data
+        # Method 1: Standard pandas parsing
         df = pd.read_csv(StringIO(csv_data))
+        st.success("✅ Standard CSV parsing successful")
+        return process_csv_data_standard(df)
         
-        # Display column names for debugging
-        with st.expander("🔍 CSV Data Structure", expanded=False):
-            st.write("**Columns found:**", list(df.columns))
-            st.write("**Sample data:**")
-            st.dataframe(df.head(3))
+    except pd.errors.ParserError as e:
+        st.warning(f"⚠️ Standard CSV parsing failed: {str(e)[:100]}...")
         
-        # Flexible column mapping to handle different CSV formats
-        column_mapping = {}
-        
-        # Map common column variations
-        for col in df.columns:
-            col_lower = col.lower().strip()
+        # Method 2: Robust parsing with error handling
+        try:
+            df = pd.read_csv(
+                StringIO(csv_data),
+                error_bad_lines=False,    # Skip bad lines
+                warn_bad_lines=True,      # Show warnings
+                on_bad_lines='skip'       # Skip malformed rows
+            )
+            st.info("🔧 Using robust CSV parsing (skipped bad lines)")
+            return process_csv_data_standard(df)
             
-            if any(x in col_lower for x in ['facility_code', 'facilitycode', 'facility code']):
-                column_mapping[col] = 'facility_code'
-            elif any(x in col_lower for x in ['facility_name', 'facilityname', 'facility name']):
-                column_mapping[col] = 'facility_name'
-            elif any(x in col_lower for x in ['capacity', 'quantity', 'volume']):
-                column_mapping[col] = 'capacity'
-            elif any(x in col_lower for x in ['capacity_type', 'capacitytype', 'type']):
-                column_mapping[col] = 'capacity_type'
-            elif any(x in col_lower for x in ['start_date', 'startdate', 'effective_date', 'gas_date']):
-                column_mapping[col] = 'effective_date'
-            elif any(x in col_lower for x in ['description', 'comment', 'notes']):
-                column_mapping[col] = 'description'
-        
-        # Rename columns
-        df = df.rename(columns=column_mapping)
-        
-        # Ensure required columns exist
-        required_columns = ['facility_code', 'capacity']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            st.warning(f"⚠️ Missing required columns: {missing_columns}")
-            return process_alternative_csv_format(df)
-        
-        # Clean and process data
-        df['capacity'] = pd.to_numeric(df['capacity'], errors='coerce')
-        df = df.dropna(subset=['capacity'])
-        df = df[df['capacity'] > 0]  # Only positive capacities
-        
-        # Map facility codes to dashboard names
-        capacity_records = []
-        
-        for _, row in df.iterrows():
-            facility_code = str(row.get('facility_code', '')).strip()
-            facility_name = str(row.get('facility_name', facility_code)).strip()
-            capacity = row.get('capacity', 0)
-            capacity_type = str(row.get('capacity_type', 'NAMEPLATE')).strip()
-            description = str(row.get('description', 'CSV Import')).strip()
-            effective_date = str(row.get('effective_date', '2024-01-01')).strip()
+        except Exception as e2:
+            st.warning(f"⚠️ Robust CSV parsing failed: {str(e2)[:100]}...")
             
-            # Map to dashboard facility names
-            dashboard_facility = map_facility_code_to_dashboard_name(facility_code, facility_name)
+            # Method 3: Manual line-by-line parsing
+            return parse_csv_manually(csv_data)
+
+def parse_csv_manually(csv_data):
+    """Manual CSV parsing for severely malformed data"""
+    
+    st.info("🔧 Attempting manual CSV parsing...")
+    
+    lines = csv_data.strip().split('\n')
+    
+    # Debug: Show problematic lines
+    with st.expander("🔍 CSV Data Analysis", expanded=False):
+        st.write(f"**Total lines:** {len(lines)}")
+        
+        # Analyze field counts per line
+        field_counts = {}
+        for i, line in enumerate(lines[:20]):  # Check first 20 lines
+            field_count = len(line.split(','))
+            field_counts[field_count] = field_counts.get(field_count, 0) + 1
             
-            if dashboard_facility and capacity > 0:
-                capacity_records.append({
-                    'dashboard_facility': dashboard_facility,
-                    'facility_code': facility_code,
-                    'facility_name': facility_name,
-                    'capacity_tj_day': capacity,
-                    'capacity_type': capacity_type,
-                    'description': description,
-                    'effective_date': effective_date
-                })
+            if i == 10:  # Show the problematic line mentioned in error
+                st.write(f"**Line {i+1} (problematic):** `{line}`")
+                st.write(f"**Field count:** {field_count}")
         
-        if not capacity_records:
-            st.warning("⚠️ No WA facilities found in CSV data")
-            return pd.DataFrame()
+        st.write("**Field count distribution:**", field_counts)
         
-        capacity_df = pd.DataFrame(capacity_records)
+        # Show first few lines for structure analysis
+        st.write("**First 5 lines:**")
+        for i, line in enumerate(lines[:5]):
+            st.code(f"Line {i+1}: {line}")
+    
+    # Attempt to identify header and determine expected field count
+    if len(lines) < 2:
+        st.error("❌ Insufficient CSV data")
+        return pd.DataFrame()
+    
+    # Try different approaches based on field count analysis
+    most_common_fields = max(set([len(line.split(',')) for line in lines[:10]]), 
+                            key=[len(line.split(',')) for line in lines[:10]].count)
+    
+    st.info(f"🔍 Most common field count: {most_common_fields}")
+    
+    # Extract valid rows with expected field count
+    valid_rows = []
+    header = None
+    
+    for i, line in enumerate(lines):
+        fields = line.split(',')
         
-        # Get latest capacity for each facility (if multiple records exist)
-        latest_capacity = capacity_df.groupby('dashboard_facility').agg({
-            'capacity_tj_day': 'last',
-            'capacity_type': 'last', 
-            'description': 'last',
-            'effective_date': 'last'
-        }).reset_index()
+        # Clean fields (remove quotes, strip whitespace)
+        cleaned_fields = [field.strip().strip('"\'') for field in fields]
         
-        st.success(f"✅ Successfully processed CSV data for {len(latest_capacity)} WA facilities")
+        if len(cleaned_fields) == most_common_fields:
+            if header is None and i < 5:  # Assume header is in first 5 lines
+                header = cleaned_fields
+                st.info(f"📋 Detected header: {header}")
+            else:
+                valid_rows.append(cleaned_fields)
+    
+    if not header or not valid_rows:
+        st.error("❌ Could not extract valid CSV structure")
+        return pd.DataFrame()
+    
+    # Create DataFrame from valid rows
+    try:
+        df = pd.DataFrame(valid_rows, columns=header)
+        st.success(f"✅ Manual parsing successful: {len(df)} valid rows extracted")
         
-        return latest_capacity
+        with st.expander("📊 Parsed Data Sample", expanded=False):
+            st.dataframe(df.head())
+        
+        return process_csv_data_standard(df)
         
     except Exception as e:
-        st.error(f"❌ CSV processing error: {e}")
+        st.error(f"❌ Manual parsing failed: {e}")
         return pd.DataFrame()
 
-def process_alternative_csv_format(df):
-    """Handle alternative CSV formats when standard processing fails"""
+def process_csv_data_standard(df):
+    """Standard CSV data processing after successful parsing"""
     
-    st.info("🔄 Trying alternative CSV format processing...")
+    if df.empty:
+        st.warning("⚠️ Empty DataFrame after parsing")
+        return pd.DataFrame()
     
-    # Look for any columns that might contain facility information
-    facility_candidates = []
-    capacity_candidates = []
+    st.write(f"📊 CSV data loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+    
+    # Display column names for debugging
+    with st.expander("🔍 CSV Data Structure", expanded=False):
+        st.write("**Columns found:**", list(df.columns))
+        st.write("**Data types:**", df.dtypes.to_dict())
+        st.write("**Sample data:**")
+        st.dataframe(df.head(3))
+        
+        # Show non-null counts
+        st.write("**Non-null counts:**")
+        st.write(df.count().to_dict())
+    
+    # Enhanced column mapping with fuzzy matching
+    column_mapping = create_flexible_column_mapping(df.columns)
+    
+    if not column_mapping:
+        st.warning("⚠️ Could not map any columns to expected format")
+        return attempt_alternative_processing(df)
+    
+    # Apply column mapping
+    df_mapped = df.rename(columns=column_mapping)
+    st.info(f"🔄 Mapped {len(column_mapping)} columns: {column_mapping}")
+    
+    # Data cleaning and validation
+    return clean_and_validate_capacity_data(df_mapped)
+
+def create_flexible_column_mapping(columns):
+    """Create flexible column mapping with fuzzy matching"""
+    
+    column_mapping = {}
+    
+    # Enhanced mapping patterns
+    mapping_patterns = {
+        'facility_code': [
+            'facility_code', 'facilitycode', 'facility code', 'code', 'facility_id',
+            'plant_code', 'station_code', 'id', 'facility'
+        ],
+        'facility_name': [
+            'facility_name', 'facilityname', 'facility name', 'name', 'plant_name',
+            'station_name', 'facility', 'description'
+        ],
+        'capacity': [
+            'capacity', 'quantity', 'volume', 'amount', 'max_capacity', 'nameplate',
+            'production_capacity', 'daily_capacity', 'tj_day', 'tj/day'
+        ],
+        'capacity_type': [
+            'capacity_type', 'capacitytype', 'type', 'category', 'classification'
+        ],
+        'effective_date': [
+            'start_date', 'startdate', 'effective_date', 'gas_date', 'date',
+            'start_gas_day', 'effective_from'
+        ],
+        'description': [
+            'description', 'comment', 'notes', 'remarks', 'status', 'reason'
+        ]
+    }
+    
+    # Fuzzy matching
+    for col in columns:
+        col_lower = str(col).lower().strip()
+        
+        for target_col, patterns in mapping_patterns.items():
+            if target_col not in column_mapping.values():  # Avoid duplicate mappings
+                for pattern in patterns:
+                    if pattern in col_lower or col_lower in pattern:
+                        column_mapping[col] = target_col
+                        break
+                if col in column_mapping:
+                    break
+    
+    return column_mapping
+
+def clean_and_validate_capacity_data(df):
+    """Clean and validate capacity data after mapping"""
+    
+    # Ensure required columns exist
+    required_columns = ['facility_code', 'capacity']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        st.warning(f"⚠️ Missing required columns: {missing_columns}")
+        return attempt_alternative_processing(df)
+    
+    # Data cleaning
+    original_rows = len(df)
+    
+    # Clean capacity column
+    if 'capacity' in df.columns:
+        # Remove non-numeric characters but preserve decimals
+        df['capacity'] = df['capacity'].astype(str).str.replace(r'[^\d.-]', '', regex=True)
+        df['capacity'] = pd.to_numeric(df['capacity'], errors='coerce')
+        
+        # Remove invalid capacities
+        df = df.dropna(subset=['capacity'])
+        df = df[df['capacity'] > 0]  # Only positive capacities
+        df = df[df['capacity'] < 10000]  # Reasonable upper limit (10,000 TJ/day)
+    
+    # Clean facility codes
+    if 'facility_code' in df.columns:
+        df['facility_code'] = df['facility_code'].astype(str).str.strip()
+        df = df[df['facility_code'] != '']
+        df = df[df['facility_code'] != 'nan']
+    
+    st.info(f"🧹 Data cleaning: {original_rows} → {len(df)} rows (removed {original_rows - len(df)} invalid rows)")
+    
+    if df.empty:
+        st.warning("⚠️ No valid data remaining after cleaning")
+        return pd.DataFrame()
+    
+    # Map facility codes to dashboard names
+    capacity_records = []
+    
+    for _, row in df.iterrows():
+        facility_code = str(row.get('facility_code', '')).strip()
+        facility_name = str(row.get('facility_name', facility_code)).strip()
+        capacity = row.get('capacity', 0)
+        capacity_type = str(row.get('capacity_type', 'NAMEPLATE')).strip()
+        description = str(row.get('description', 'CSV Import')).strip()
+        effective_date = str(row.get('effective_date', '2024-01-01')).strip()
+        
+        # Map to dashboard facility names
+        dashboard_facility = map_facility_code_to_dashboard_name(facility_code, facility_name)
+        
+        if dashboard_facility and capacity > 0:
+            capacity_records.append({
+                'dashboard_facility': dashboard_facility,
+                'facility_code': facility_code,
+                'facility_name': facility_name,
+                'capacity_tj_day': capacity,
+                'capacity_type': capacity_type,
+                'description': description,
+                'effective_date': effective_date
+            })
+    
+    if not capacity_records:
+        st.warning("⚠️ No WA facilities found in CSV data after mapping")
+        return pd.DataFrame()
+    
+    capacity_df = pd.DataFrame(capacity_records)
+    
+    # Get latest capacity for each facility (if multiple records exist)
+    latest_capacity = capacity_df.groupby('dashboard_facility').agg({
+        'capacity_tj_day': 'last',
+        'capacity_type': 'last', 
+        'description': 'last',
+        'effective_date': 'last'
+    }).reset_index()
+    
+    st.success(f"✅ Successfully processed CSV data for {len(latest_capacity)} WA facilities")
+    
+    return latest_capacity
+
+def attempt_alternative_processing(df):
+    """Last resort processing when standard methods fail"""
+    
+    st.info("🔧 Attempting alternative data extraction...")
+    
+    # Look for any columns with numeric data that could be capacity
+    numeric_columns = []
+    facility_columns = []
     
     for col in df.columns:
-        col_lower = col.lower()
-        
-        # Check if column might contain facility names
-        if any(keyword in col_lower for keyword in ['facility', 'plant', 'station', 'site']):
-            facility_candidates.append(col)
-        
-        # Check if column might contain numeric capacity values
+        # Check for numeric data
         try:
-            numeric_values = pd.to_numeric(df[col], errors='coerce')
-            if not numeric_values.isna().all() and numeric_values.max() > 10:  # Reasonable capacity threshold
-                capacity_candidates.append(col)
+            numeric_data = pd.to_numeric(df[col], errors='coerce')
+            if not numeric_data.isna().all() and numeric_data.max() > 10:
+                numeric_columns.append((col, numeric_data.max()))
         except:
             pass
+        
+        # Check for text that might be facility names
+        if df[col].dtype == 'object':
+            sample_values = df[col].dropna().astype(str).head(5).tolist()
+            if any(len(val) > 3 for val in sample_values):  # Reasonable text length
+                facility_columns.append(col)
     
-    if facility_candidates and capacity_candidates:
-        st.info(f"🔍 Found potential facility columns: {facility_candidates}")
-        st.info(f"🔍 Found potential capacity columns: {capacity_candidates}")
-        
-        # Use first candidates
-        facility_col = facility_candidates[0]
-        capacity_col = capacity_candidates[0]
-        
-        # Create simplified mapping
-        simplified_records = []
-        for _, row in df.iterrows():
+    if not numeric_columns or not facility_columns:
+        st.error("❌ Could not identify capacity or facility columns")
+        return pd.DataFrame()
+    
+    # Use the numeric column with highest max value as capacity
+    capacity_col = max(numeric_columns, key=lambda x: x[1])[0]
+    facility_col = facility_columns[0]  # Use first text column as facility
+    
+    st.info(f"🔍 Using '{capacity_col}' as capacity, '{facility_col}' as facility")
+    
+    # Create simplified records
+    alternative_records = []
+    for _, row in df.iterrows():
+        try:
             facility_name = str(row[facility_col]).strip()
             capacity = pd.to_numeric(row[capacity_col], errors='coerce')
             
-            if pd.notna(capacity) and capacity > 0:
-                # Try to match to dashboard facilities
+            if pd.notna(capacity) and capacity > 0 and facility_name:
                 dashboard_facility = map_facility_code_to_dashboard_name('', facility_name)
                 
                 if dashboard_facility:
-                    simplified_records.append({
+                    alternative_records.append({
                         'dashboard_facility': dashboard_facility,
                         'facility_code': '',
                         'facility_name': facility_name,
                         'capacity_tj_day': capacity,
-                        'capacity_type': 'CSV_IMPORT',
+                        'capacity_type': 'ALTERNATIVE_PARSING',
                         'description': 'Alternative CSV Processing',
                         'effective_date': '2024-01-01'
                     })
-        
-        if simplified_records:
-            st.success(f"✅ Alternative processing found {len(simplified_records)} facilities")
-            return pd.DataFrame(simplified_records)
+        except:
+            continue
     
-    st.warning("⚠️ Could not process CSV in any known format")
-    return pd.DataFrame()
+    if alternative_records:
+        st.success(f"✅ Alternative processing found {len(alternative_records)} facilities")
+        return pd.DataFrame(alternative_records)
+    else:
+        st.error("❌ Alternative processing failed to extract any facilities")
+        return pd.DataFrame()
 
 def process_medium_term_capacity_json(api_data):
     """Process JSON response from Medium Term Capacity API"""
