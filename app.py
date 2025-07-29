@@ -879,14 +879,6 @@ def display_command_center():
         # Market Balance
         production_df = fetch_production_facility_data()
         demand_df = fetch_market_demand_data()
-
-        # DEBUG: Check column alignment
-st.write("**🔍 Column Debugging:**")
-actual_columns = [col for col in production_df.columns if col not in ['Date', 'Total_Supply']]
-st.write(f"**Actual DataFrame Columns ({len(actual_columns)}):**")
-for i, col in enumerate(actual_columns, 1):
-    st.write(f"{i}. `{col}`")
-
 st.write(f"**Selected Facilities ({len(selected_facilities)}):**")
 for i, facility in enumerate(selected_facilities, 1):
     is_match = facility in actual_columns
