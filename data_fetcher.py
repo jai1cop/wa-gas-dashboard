@@ -1,300 +1,264 @@
-import os
-import requests
+import streamlit as st
 import pandas as pd
-from datetime import datetime
+import plotly.express as px
+import data_fetcher as dfc
+from datetime import date
 
-# Use national source but filter to WA only
-GBB_BASE = "https://nemweb.com.au/Reports/Current/GBB/"
+st.set_page_config("WA Gas Dashboard", layout="wide")
+st.title("WA Gas Supply & Demand Dashboard")
 
-FILES = {
-    "flows": "GasBBActualFlowStorageLast31.CSV",
-    "mto_future": "GasBBMediumTermCapacityOutlookFuture.csv",
-    "nameplate": "GasBBNameplateRatingCurrent.csv",
-}
-
-CACHE_DIR = "data_cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-def _download(fname):
+# Load real AEMO data with proper error handling
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def load_real_data():
     try:
-        url = GBB_BASE + fname
-        response = requests.get(url, timeout=40)
-        response.raise_for_status()
-
-        text = response.text.strip().lower()
-        if text.startswith("<!doctype html") or text.startswith("<html"):
-            raise ValueError(f"{url} returned HTML page, not CSV data")
-
-        path = os.path.join(CACHE_DIR, fname)
-        with open(path, "wb") as f:
-            f.write(response.content)
-        return path
-
+        result = dfc.get_model()
+        if result is None:
+            # Handle case where get_model returns None
+            return pd.DataFrame(), pd.DataFrame()
+        return result
     except Exception as e:
-        print(f"[ERROR] Failed to download {fname}: {e}")
-        error_path = os.path.join(CACHE_DIR, fname)
-        if os.path.exists(error_path):
-            os.remove(error_path)
-        raise
+        st.error(f"Error loading AEMO data: {e}")
+        # CRITICAL: Always return a tuple, never None
+        return pd.DataFrame(), pd.DataFrame()
 
-def _stale(path):
-    if not os.path.exists(path):
-        return True
-    last_modified = datetime.utcfromtimestamp(os.path.getmtime(path))
-    return (datetime.utcnow() - last_modified).days > 0
+# Sidebar controls
+st.sidebar.header("Scenario Controls")
 
-def fetch_csv(key, force=False):
-    try:
-        fname = FILES[key]
-        fpath = os.path.join(CACHE_DIR, fname)
+# Yara consumption slider
+yara_val = st.sidebar.slider(
+    "Yara Pilbara Fertilisers gas consumption (TJ/day)",
+    min_value=0, max_value=100, value=80, step=5,
+    help="Adjust Yara's gas consumption to see market impact"
+)
+
+# Manual refresh button
+if st.sidebar.button("Refresh AEMO Data"):
+    st.cache_data.clear()
+    st.sidebar.success("Data refreshed!")
+
+# Load data with defensive unpacking
+try:
+    result = load_real_data()
+    if result is None:
+        sup, model = pd.DataFrame(), pd.DataFrame()
+    else:
+        sup, model = result
+except Exception as e:
+    st.error(f"Failed to load data: {e}")
+    sup, model = pd.DataFrame(), pd.DataFrame()
+
+# COMPREHENSIVE DEBUG SECTION
+st.sidebar.write("**📊 Debug Information:**")
+st.sidebar.write(f"Supply DataFrame shape: {sup.shape}")
+st.sidebar.write(f"Model DataFrame shape: {model.shape}")
+
+# Supply Debug
+if not sup.empty:
+    st.sidebar.write("**Supply Analysis:**")
+    st.sidebar.write(f"Supply date range: {sup['GasDay'].min()} to {sup['GasDay'].max()}")
+    st.sidebar.write(f"Unique facilities: {sup['FacilityName'].nunique()}")
+    st.sidebar.write(f"Total TJ_Available sum: {sup['TJ_Available'].sum():.2f}")
+    duplicates = sup.groupby(['GasDay', 'FacilityName']).size()
+    duplicate_count = len(duplicates[duplicates > 1])
+    st.sidebar.write(f"Duplicate facility-date entries: {duplicate_count}")
+else:
+    st.sidebar.error("❌ Supply DataFrame is EMPTY")
+
+# DEMAND ANALYSIS DEBUG
+st.sidebar.write("**📈 Demand Analysis Debug:**")
+if not model.empty and 'TJ_Demand' in model.columns:
+    demand_stats = model['TJ_Demand'].describe()
+    st.sidebar.write("**Demand Statistics:**")
+    st.sidebar.dataframe(demand_stats)
+    
+    avg_demand = model['TJ_Demand'].mean()
+    max_demand = model['TJ_Demand'].max()
+    min_demand = model['TJ_Demand'].min()
+    
+    st.sidebar.write(f"Average daily demand: {avg_demand:.1f} TJ/day")
+    st.sidebar.write(f"Maximum daily demand: {max_demand:.1f} TJ/day")
+    st.sidebar.write(f"Minimum daily demand: {min_demand:.1f} TJ/day")
+    
+    # Typical WA gas demand is around 1,000-1,500 TJ/day
+    if avg_demand > 2000:
+        st.sidebar.warning("⚠️ Demand seems high - typical WA demand is 1,000-1,500 TJ/day")
+    elif avg_demand < 500:
+        st.sidebar.warning("⚠️ Demand seems low - check data aggregation")
+    else:
+        st.sidebar.success("✅ Demand levels look reasonable")
+
+# Raw demand data debug
+try:
+    flows_raw = dfc.fetch_csv("flows", force=False)
+    if not flows_raw.empty and 'demand' in flows_raw.columns:
+        st.sidebar.write("**Raw Flows Demand Debug:**")
+        st.sidebar.write(f"Total raw demand records: {len(flows_raw)}")
         
-        if force or _stale(fpath):
-            fpath = _download(fname)
+        # Check for negative values
+        negative_demand = flows_raw[flows_raw['demand'] < 0]
+        st.sidebar.write(f"Negative demand records: {len(negative_demand)}")
+        
+        # Check demand by facility type
+        if 'facilitytype' in flows_raw.columns:
+            demand_by_type = flows_raw.groupby('facilitytype')['demand'].sum().sort_values(ascending=False)
+            st.sidebar.write("**Demand by facility type:**")
+            st.sidebar.dataframe(demand_by_type.head())
+        
+        # Check for unusually high individual records
+        high_demand = flows_raw[flows_raw['demand'] > 1000]  # Over 1000 TJ in single record
+        st.sidebar.write(f"Records with >1000 TJ demand: {len(high_demand)}")
+        
+        if len(high_demand) > 0:
+            st.sidebar.write("**Sample high demand records:**")
+            st.sidebar.dataframe(high_demand[['facilityname', 'gasdate', 'demand']].head())
+            
+except Exception as e:
+    st.sidebar.error(f"Demand debug error: {e}")
 
-        df = pd.read_csv(fpath)
-        df.columns = df.columns.str.lower()
-        return df
+# Model Debug
+if not model.empty:
+    st.sidebar.write("**Model Analysis:**")
+    st.sidebar.write(f"Model date range: {model['GasDay'].min()} to {model['GasDay'].max()}")
+    if 'TJ_Available' in model.columns:
+        total_supply = model['TJ_Available'].sum()
+        st.sidebar.write(f"Total supply across all days: {total_supply:.2f} TJ")
 
-    except Exception as e:
-        print(f"[ERROR] Could not load {key}: {e}")
-        return pd.DataFrame()
-
-def clean_nameplate(df):
-    """Extract WA facilities from national nameplate data"""
-    print(f"[DEBUG] National nameplate input: {df.shape}")
+# MAIN DASHBOARD LOGIC
+if model.empty:
+    st.error("No data available - using sample data")
+    # Sample data fallback
+    sample_data = {
+        'Date': pd.date_range('2025-07-29', periods=30),
+        'Supply': [1800 + i*5 for i in range(30)],
+        'Demand': [1600 + i*3 for i in range(30)]
+    }
+    df = pd.DataFrame(sample_data)
+    df['Balance'] = df['Supply'] - df['Demand']
     
-    if df.empty or 'capacityquantity' not in df.columns:
-        return pd.DataFrame(columns=["FacilityName", "TJ_Nameplate"])
+    fig = px.line(df, x='Date', y=['Supply', 'Demand'], 
+                  title="Sample Gas Supply vs Demand")
+    st.plotly_chart(fig, use_container_width=True)
     
-    # Filter for WA facilities by location or facility name patterns
-    wa_df = df.copy()
-    if 'state' in df.columns:
-        wa_df = df[df['state'].isin(['WA', 'wa', 'Western Australia'])]
-        print(f"[DEBUG] Filtered by state to WA: {wa_df.shape}")
-    elif 'deliverylocationname' in df.columns:
-        # Filter by WA locations
-        wa_locations = df[df['deliverylocationname'].str.contains(
-            'WA|Western|Perth|Karratha|Dampier|Varanus|Macedon|Wheatstone|Gorgon|NWS|North West Shelf', 
-            case=False, na=False
-        )]
-        wa_df = wa_locations
-        print(f"[DEBUG] Filtered by WA location names: {wa_df.shape}")
-    elif 'facilityname' in df.columns:
-        # Filter by known WA facility names
-        wa_facilities = df[df['facilityname'].str.contains(
-            'Karratha|Varanus|Macedon|Wheatstone|Gorgon|NWS|North West Shelf|Dampier|Mondarra|Tubridgi|Devil Creek|Scarborough|Waitsia', 
-            case=False, na=False
-        )]
-        wa_df = wa_facilities
-        print(f"[DEBUG] Filtered by WA facility names: {wa_df.shape}")
+else:
+    st.success(f"✅ Loaded {len(model)} days of real AEMO data")
     
-    result = wa_df[['facilityname', 'capacityquantity']].copy()
-    result.rename(columns={
-        'facilityname': 'FacilityName',
-        'capacityquantity': 'TJ_Nameplate'
-    }, inplace=True)
+    # Check required columns
+    required_cols = ['TJ_Demand', 'TJ_Available']
+    missing_cols = [col for col in required_cols if col not in model.columns]
     
-    result = result.dropna()
-    print(f"[DEBUG] WA Nameplate output: {result.shape} facilities")
-    return result
-
-def clean_mto(df):
-    """Extract WA facilities from national MTO data"""
-    print(f"[DEBUG] National MTO input: {df.shape}")
+    if missing_cols:
+        st.error(f"❌ Missing required columns: {missing_cols}")
+        st.write("Available columns:", list(model.columns))
+        st.stop()
     
-    if df.empty:
-        return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available"])
+    # Apply Yara adjustment
+    model_adj = model.copy()
+    model_adj["TJ_Demand"] = model_adj["TJ_Demand"] + (yara_val - 80)
+    model_adj["Shortfall"] = model_adj["TJ_Available"] - model_adj["TJ_Demand"]
     
-    required_cols = ['facilityname', 'fromgasdate', 'outlookquantity']
-    missing = [col for col in required_cols if col not in df.columns]
-    if missing:
-        print(f"[WARNING] Missing MTO columns: {missing}")
-        return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available"])
-
-    # Filter for WA facilities
-    wa_df = df.copy()
-    if 'deliverylocationname' in df.columns:
-        wa_locations = df[df['deliverylocationname'].str.contains(
-            'WA|Western|Perth|Karratha|Dampier|Varanus|Macedon|Wheatstone|Gorgon|NWS|North West Shelf', 
-            case=False, na=False
-        )]
-        wa_df = wa_locations
-        print(f"[DEBUG] MTO filtered by WA locations: {wa_df.shape}")
-    elif 'facilityname' in df.columns:
-        wa_facilities = df[df['facilityname'].str.contains(
-            'Karratha|Varanus|Macedon|Wheatstone|Gorgon|NWS|North West Shelf|Dampier|Mondarra|Tubridgi|Devil Creek|Scarborough|Waitsia', 
-            case=False, na=False
-        )]
-        wa_df = wa_facilities
-        print(f"[DEBUG] MTO filtered by WA facility names: {wa_df.shape}")
-    
-    wa_df['fromgasdate'] = pd.to_datetime(wa_df['fromgasdate'], errors="coerce")
-    result = wa_df[['facilityname', 'fromgasdate', 'outlookquantity']].copy()
-    result = result.dropna(subset=['fromgasdate'])
-    
-    result.rename(columns={
-        'facilityname': 'FacilityName',
-        'fromgasdate': 'GasDay',
-        'outlookquantity': 'TJ_Available'
-    }, inplace=True)
-    
-    # Aggregate duplicates
-    result = result.groupby(['FacilityName', 'GasDay'])['TJ_Available'].sum().reset_index()
-    
-    print(f"[DEBUG] WA MTO output: {result.shape} records")
-    return result
-
-def build_supply_profile():
-    """Build WA supply profile from national data"""
-    nameplate = clean_nameplate(fetch_csv("nameplate"))
-    mto = clean_mto(fetch_csv("mto_future"))
-
-    print(f"[DEBUG] WA Supply building - Nameplate: {nameplate.shape}, MTO: {mto.shape}")
-
-    if nameplate.empty and mto.empty:
-        return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available", "TJ_Nameplate"])
-    
-    # If no MTO data, create future dates with nameplate capacity
-    if mto.empty and not nameplate.empty:
-        dates = pd.date_range(start=pd.Timestamp.now(), periods=365, freq='D')
-        supply_list = []
-        for _, facility in nameplate.iterrows():
-            for date in dates:
-                supply_list.append({
-                    'FacilityName': facility['FacilityName'],
-                    'GasDay': date,
-                    'TJ_Available': facility['TJ_Nameplate'],
-                    'TJ_Nameplate': facility['TJ_Nameplate']
-                })
-        return pd.DataFrame(supply_list)
-
-    # If no nameplate data, use MTO only
-    if nameplate.empty and not mto.empty:
-        mto['TJ_Nameplate'] = mto['TJ_Available']
-        return mto
-
-    # Merge nameplate and MTO
-    supply = mto.merge(nameplate, on="FacilityName", how="left")
-    supply["TJ_Available"] = supply["TJ_Available"].fillna(supply["TJ_Nameplate"])
-    
-    print(f"[DEBUG] WA Final supply profile: {supply.shape}")
-    return supply
-
-def build_demand_profile():
-    """Build WA-only demand profile with relaxed filtering"""
-    flows = fetch_csv("flows")
-    print(f"[DEBUG] National flows input: {flows.shape}")
-    
-    if flows.empty or 'gasdate' not in flows.columns or 'demand' not in flows.columns:
-        return pd.DataFrame(columns=["GasDay", "TJ_Demand"])
-
-    flows['gasdate'] = pd.to_datetime(flows['gasdate'], errors="coerce")
-    flows = flows.dropna(subset=['gasdate'])
-    
-    # RELAXED WA FILTERING - Less restrictive approach
-    wa_flows = flows.copy()
-    
-    # Try multiple filtering approaches in order of preference
-    if 'locationname' in flows.columns:
-        # First try: Look for "whole wa" specifically
-        whole_wa = flows[flows['locationname'].str.contains('whole wa', case=False, na=False)]
-        if not whole_wa.empty:
-            wa_flows = whole_wa
-            print(f"[DEBUG] Found 'whole wa' location data: {wa_flows.shape}")
-        else:
-            # Second try: Broader WA location filtering
-            wa_locations = flows[flows['locationname'].str.contains(
-                'WA|Western Australia|wa', case=False, na=False
-            )]
-            if not wa_locations.empty:
-                wa_flows = wa_locations
-                print(f"[DEBUG] WA flows after location filter: {wa_flows.shape}")
+    # Supply stack chart with duplicate handling
+    if not sup.empty and all(col in sup.columns for col in ['TJ_Available', 'FacilityName', 'GasDay']):
+        try:
+            # Aggregate duplicate facility-date combinations
+            sup_agg = sup.groupby(['GasDay', 'FacilityName'])['TJ_Available'].sum().reset_index()
+            
+            # Pivot for stacked area chart
+            stack = sup_agg.pivot(index="GasDay", columns="FacilityName", values="TJ_Available")
+            today_dt = pd.to_datetime(date.today())
+            stack = stack.loc[stack.index >= today_dt]
+            
+            if not stack.empty:
+                fig1 = px.area(stack,
+                              labels={"value": "TJ/day", "GasDay": "Date", "variable": "Facility"},
+                              title="WA Gas Supply by Facility (Stacked)")
+                fig1.update_traces(hovertemplate="%{y:.0f} TJ<br>%{x|%d-%b-%Y}")
+                
+                # Add demand line
+                fig1.add_scatter(x=model_adj["GasDay"], y=model_adj["TJ_Demand"],
+                               mode="lines", name="Historical / Forecast Demand",
+                               line=dict(color="black", width=3))
+                
+                # Add shortfall markers
+                shortfalls = model_adj[model_adj["Shortfall"] < 0]
+                if not shortfalls.empty:
+                    fig1.add_scatter(x=shortfalls["GasDay"], y=shortfalls["TJ_Demand"],
+                                   mode="markers", name="Shortfall",
+                                   marker=dict(color="red", size=7, symbol="x"))
+                
+                st.plotly_chart(fig1, use_container_width=True)
             else:
-                print("[DEBUG] No WA locations found, using proportional estimate")
+                st.warning("⚠️ No future supply data available for chart")
+        except Exception as e:
+            st.error(f"Error creating supply chart: {e}")
+            # Show additional debug for chart error
+            if not sup.empty:
+                st.write("Supply data for chart debugging:")
+                st.dataframe(sup.head())
+    else:
+        st.error("❌ Supply data missing required columns for stacked chart")
+        st.write("**Required:** ['TJ_Available', 'FacilityName', 'GasDay']")
+        if not sup.empty:
+            st.write("**Available supply columns:**", list(sup.columns))
+        else:
+            st.write("**Supply DataFrame is empty**")
     
-    # If no location-based filtering worked, use proportional approach
-    if wa_flows.shape[0] == flows.shape[0]:  # No filtering occurred
-        print("[DEBUG] No WA filtering applied - using proportional estimate (15% of national)")
-        # Filter for positive demand only first
-        positive_flows = flows[flows['demand'] > 0].copy()
+    # Supply-demand balance bar chart
+    try:
+        fig2 = px.bar(model_adj, x="GasDay", y="Shortfall",
+                      color=model_adj["Shortfall"] >= 0,
+                      color_discrete_map={True: "green", False: "red"},
+                      labels={"Shortfall": "Supply-Demand Gap (TJ)"},
+                      title="Daily Market Balance")
+        fig2.update_layout(showlegend=False)
+        st.plotly_chart(fig2, use_container_width=True)
         
-        # Aggregate national demand by date
-        national_demand = positive_flows.groupby('gasdate')['demand'].sum().reset_index()
+        # Show balance statistics
+        avg_shortfall = model_adj['Shortfall'].mean()
+        if avg_shortfall < 0:
+            st.warning(f"⚠️ Average daily shortfall: {abs(avg_shortfall):.1f} TJ/day")
+        else:
+            st.success(f"✅ Average daily surplus: {avg_shortfall:.1f} TJ/day")
         
-        # Apply WA proportion (approximately 15% of national gas demand)
-        national_demand['demand'] = national_demand['demand'] * 0.15
+    except Exception as e:
+        st.error(f"Error creating balance chart: {e}")
+    
+    # Data table
+    st.subheader("Daily Balance Summary")
+    try:
+        display_cols = ["GasDay", "TJ_Available", "TJ_Demand", "Shortfall"]
+        available_cols = [col for col in display_cols if col in model_adj.columns]
         
-        demand = national_demand.rename(columns={'gasdate': 'GasDay', 'demand': 'TJ_Demand'})
-        
-        print(f"[DEBUG] WA Proportional demand profile: {demand.shape}, avg daily: {demand['TJ_Demand'].mean():.1f} TJ")
-        return demand
-    
-    # Process the filtered WA flows
-    demand_flows = wa_flows[wa_flows['demand'] > 0].copy()
-    print(f"[DEBUG] WA positive demand records: {len(demand_flows)}")
-    
-    if demand_flows.empty:
-        print("[WARNING] No positive demand records after WA filtering - using proportional estimate")
-        # Fallback to proportional approach
-        positive_flows = flows[flows['demand'] > 0].copy()
-        national_demand = positive_flows.groupby('gasdate')['demand'].sum().reset_index()
-        national_demand['demand'] = national_demand['demand'] * 0.15
-        demand = national_demand.rename(columns={'gasdate': 'GasDay', 'demand': 'TJ_Demand'})
-        return demand
-    
-    # Aggregate demand by date
-    demand = demand_flows.groupby('gasdate')['demand'].sum().reset_index()
-    
-    # Apply scaling if demand seems too high
-    if demand['demand'].mean() > 3000:
-        demand['demand'] = demand['demand'] / 2.0
-        print("[DEBUG] Applied scaling for realistic WA demand levels")
-    
-    demand.rename(columns={'gasdate': 'GasDay', 'demand': 'TJ_Demand'}, inplace=True)
-    
-    print(f"[DEBUG] WA Demand profile: {demand.shape}, avg daily: {demand['TJ_Demand'].mean():.1f} TJ")
-    return demand
+        if available_cols:
+            display_df = model_adj[available_cols].copy()
+            
+            # Rename for display
+            rename_map = {
+                "GasDay": "Date",
+                "TJ_Available": "Available Supply (TJ)",
+                "TJ_Demand": "Demand (TJ)",
+                "Shortfall": "Balance (TJ)"
+            }
+            display_df = display_df.rename(columns={k: v for k, v in rename_map.items() if k in display_df.columns})
+            
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Show summary statistics
+            if 'Available Supply (TJ)' in display_df.columns and 'Demand (TJ)' in display_df.columns:
+                avg_supply = display_df['Available Supply (TJ)'].mean()
+                avg_demand = display_df['Demand (TJ)'].mean()
+                st.write(f"**Summary:** Average Supply: {avg_supply:.1f} TJ/day | Average Demand: {avg_demand:.1f} TJ/day")
+                
+        else:
+            st.error("No suitable columns for data table")
+            
+    except Exception as e:
+        st.error(f"Error creating data table: {e}")
 
+# STATUS SUMMARY
+st.sidebar.write("**🎯 Status Summary:**")
+st.sidebar.write(f"Dashboard loaded: {'✅' if not model.empty else '❌'}")
+st.sidebar.write(f"Supply data: {'✅' if not sup.empty else '❌'}")
+st.sidebar.write(f"Demand data: {'✅' if not model.empty and 'TJ_Demand' in model.columns else '❌'}")
 
-def get_model():
-    """Main function for WA gas market model"""
-    sup = build_supply_profile()
-    dem = build_demand_profile()
-
-    print(f"[DEBUG] WA get_model - Supply: {sup.shape}, Demand: {dem.shape}")
-
-    if dem.empty:
-        return sup, dem
-
-    if sup.empty:
-        print("[WARNING] No WA supply data - creating zero supply model")
-        dem['TJ_Available'] = 0
-        dem['Shortfall'] = dem['TJ_Available'] - dem['TJ_Demand']
-        return sup, dem
-
-    print(f"[DEBUG] WA Supply dates: {sup['GasDay'].min()} to {sup['GasDay'].max()}")
-    print(f"[DEBUG] WA Demand dates: {dem['GasDay'].min()} to {dem['GasDay'].max()}")
-
-    # Get demand date range
-    demand_start = dem['GasDay'].min()
-    demand_end = dem['GasDay'].max()
-    
-    # Filter supply to demand date range
-    extended_start = demand_start - pd.Timedelta(days=7)
-    extended_end = demand_end + pd.Timedelta(days=365)
-    
-    relevant_supply = sup[
-        (sup['GasDay'] >= extended_start) & 
-        (sup['GasDay'] <= extended_end)
-    ]
-    
-    print(f"[DEBUG] WA Filtered supply: {relevant_supply.shape}")
-    
-    if relevant_supply.empty:
-        # Use latest available supply
-        latest_supply_date = sup['GasDay'].max()
-        latest_supply = sup[sup['GasDay'] == latest_supply_date]
-        supply_total = latest_supply['TJ_Available'].sum()
-        dem['TJ_Available'] = supply_total
-        dem['Shortfall'] = dem['TJ_Available'] - dem['TJ_Demand']
-        print(f"[DEBUG] Used latest WA supply {supply_total} TJ for all demand dates")
+# Streamlit Cloud logs reminder
+st.sidebar.info("💡 **Tip:** Check Streamlit Cloud logs (Manage app → Logs) for detailed [DEBUG] messages from data_fetcher.py")
