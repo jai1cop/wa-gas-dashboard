@@ -6,6 +6,163 @@ from plotly.subplots import make_subplots
 from datetime import datetime, date, timedelta
 import json
 
+from fetch_gbb_data import (
+    get_all_current_data, 
+    get_actual_flows,
+    get_capacity_outlook, 
+    get_medium_term_capacity,
+    get_forecast_flows,
+    get_end_user_consumption,
+    get_large_user_consumption,
+    get_linepack_adequacy,
+    get_trucked_gas,
+    api_client
+)
+
+# Page configuration
+st.set_page_config(
+    page_title="WA Gas Market Dashboard", 
+    page_icon="⛽",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+def apply_advanced_styling():
+    """Apply advanced CSS styling"""
+    
+    st.markdown("""
+    <style>
+        /* Import Google Fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        /* Global styles */
+        .stApp {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        /* Hide Streamlit style */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
+        /* Main header */
+        .main-header {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #1f77b4;
+            text-align: center;
+            margin: 1rem 0 2rem 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Sub headers */
+        .sub-header {
+            font-size: 1.5rem;
+            color: #2c3e50;
+            margin: 1rem 0;
+            padding: 0.5rem 0;
+            border-bottom: 2px solid #3498db;
+        }
+        
+        /* Metric cards */
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 1.5rem;
+            border-radius: 12px;
+            color: white;
+            text-align: center;
+            margin: 0.5rem 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: transform 0.2s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        /* API status box */
+        .api-status {
+            background: linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%);
+            padding: 1rem;
+            border-radius: 8px;
+            border-left: 5px solid #27ae60;
+            margin: 1rem 0;
+        }
+        
+        /* Data timestamp */
+        .data-timestamp {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+            font-style: italic;
+            text-align: center;
+            margin-top: 1rem;
+        }
+        
+        /* Tab styling */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 8px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            padding: 4px;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            border-radius: 8px;
+            color: #6c757d;
+            font-weight: 500;
+        }
+        
+        .stTabs [aria-selected="true"] {
+            background-color: white;
+            color: #495057;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Button styling */
+        .stButton > button {
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        
+        .stButton > button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        /* Info boxes */
+        .custom-info-box {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-left: 4px solid #2196f3;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+        
+        /* Success boxes */
+        .custom-success-box {
+            background: linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%);
+            border-left: 4px solid #4caf50;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+        
+        /* Warning boxes */
+        .custom-warning-box {
+            background: linear-gradient(135deg, #fff3e0 0%, #ffcc02 100%);
+            border-left: 4px solid #ff9800;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
 def create_advanced_header():
     """Create a professional header with navigation"""
     
@@ -30,133 +187,72 @@ def create_advanced_header():
     </div>
     """, unsafe_allow_html=True)
 
-    # Navigation breadcrumb
-    st.markdown("""
-    <div style="margin-bottom: 1.5rem; padding: 0.5rem 0; border-bottom: 1px solid #e0e0e0;">
-        <span style="color: #666; font-size: 0.9rem;">
-            🏠 Home → 📊 Analytics → ⛽ WA Gas Market
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def has_data(obj):
-    """Helper function to safely check if pandas objects have data"""
-    if hasattr(obj, '__len__'):
-        return len(obj) > 0
-    return bool(obj)
-
-from fetch_gbb_data import (
-    get_all_current_data, 
-    get_actual_flows,
-    get_capacity_outlook, 
-    get_medium_term_capacity,
-    get_forecast_flows,
-    get_end_user_consumption,
-    get_large_user_consumption,
-    get_linepack_adequacy,
-    get_trucked_gas,
-    api_client
-)
-
-# Page configuration
-st.set_page_config(
-    page_title="WA Gas Market Dashboard", 
-    page_icon="⛽",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin: 1rem 0 2rem 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-    }
-    .sub-header {
-        font-size: 1.5rem;
-        color: #2c3e50;
-        margin: 1rem 0;
-        padding: 0.5rem 0;
-        border-bottom: 2px solid #3498db;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin: 0.5rem 0;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .api-status {
-        background-color: #e8f5e8;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 5px solid #27ae60;
-        margin: 1rem 0;
-    }
-    .data-timestamp {
-        color: #7f8c8d;
-        font-size: 0.9rem;
-        font-style: italic;
-        text-align: center;
-        margin-top: 1rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-def create_summary_metrics(datasets):
-    """Create summary metrics from all datasets"""
-    col1, col2, col3, col4 = st.columns(4)
+def create_executive_summary(datasets):
+    """Create an executive summary with KPIs"""
+    
+    st.markdown("## 📈 Executive Summary")
+    
+    # Calculate key metrics
+    total_records = sum(len(df) for df in datasets.values() if not df.empty)
+    active_endpoints = sum(1 for df in datasets.values() if not df.empty)
+    
+    # Top-level KPIs
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        flows_count = len(datasets.get('actual_flows', pd.DataFrame()))
-        st.markdown(f"""
+        st.markdown("""
         <div class="metric-card">
-            <h3>🔄 Actual Flows</h3>
-            <h2>{flows_count:,}</h2>
-            <p>Records Available</p>
+            <div style="font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem;">📊</div>
+            <div style="font-size: 2rem; font-weight: bold;">{:,}</div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">Total Records</div>
         </div>
-        """, unsafe_allow_html=True)
+        """.format(total_records), unsafe_allow_html=True)
     
     with col2:
-        capacity_count = len(datasets.get('capacity_outlook', pd.DataFrame()))
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3>📊 Capacity Data</h3>
-            <h2>{capacity_count:,}</h2>
-            <p>Records Available</p>
+        flows_count = len(datasets.get('actual_flows', pd.DataFrame()))
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                    padding: 1.5rem; border-radius: 12px; text-align: center; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+            <div style="font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem;">🔄</div>
+            <div style="font-size: 2rem; font-weight: bold;">{}</div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">Flow Points</div>
         </div>
-        """, unsafe_allow_html=True)
+        """.format(flows_count), unsafe_allow_html=True)
     
     with col3:
-        consumption_count = len(datasets.get('end_user_consumption', pd.DataFrame()))
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3>🏭 Consumption</h3>
-            <h2>{consumption_count:,}</h2>
-            <p>Records Available</p>
+        capacity_count = len(datasets.get('capacity_outlook', pd.DataFrame()))
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                    padding: 1.5rem; border-radius: 12px; text-align: center; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+            <div style="font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem;">⚡</div>
+            <div style="font-size: 2rem; font-weight: bold;">{}</div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">Capacity Points</div>
         </div>
-        """, unsafe_allow_html=True)
+        """.format(capacity_count), unsafe_allow_html=True)
     
     with col4:
-        total_records = sum(len(df) for df in datasets.values() if not df.empty)
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3>📈 Total Data</h3>
-            <h2>{total_records:,}</h2>
-            <p>Total Records</p>
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); 
+                    padding: 1.5rem; border-radius: 12px; text-align: center; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+            <div style="font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem;">🟢</div>
+            <div style="font-size: 2rem; font-weight: bold;">{}/8</div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">Active Feeds</div>
         </div>
-        """, unsafe_allow_html=True)
+        """.format(active_endpoints), unsafe_allow_html=True)
+    
+    with col5:
+        freshness = "🟢 Live" if total_records > 0 else "🔴 Offline"
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); 
+                    padding: 1.5rem; border-radius: 12px; text-align: center; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+            <div style="font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem;">📡</div>
+            <div style="font-size: 1.2rem; font-weight: bold;">{}</div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">Data Status</div>
+        </div>
+        """.format(freshness), unsafe_allow_html=True)
 
-def create_flow_chart(flows_df):
-    """Create interactive flow visualization"""
+def create_professional_flow_chart(flows_df):
+    """Create a professional-grade flow chart"""
     if flows_df.empty:
         st.warning("No flow data available for visualization")
         return
@@ -189,7 +285,9 @@ def create_flow_chart(flows_df):
                 height=400,
                 xaxis_title="Time Period",
                 yaxis_title="Flow Value",
-                hovermode='x unified'
+                hovermode='x unified',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
             )
             
             st.plotly_chart(fig, use_container_width=True)
@@ -206,45 +304,100 @@ def create_flow_chart(flows_df):
                 title="Gas Flow Data (Recent Records)",
                 height=400
             )
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-def main():
-    # Header
-    st.markdown('<h1 class="main-header">⛽ WA Gas Market Dashboard</h1>', unsafe_allow_html=True)
+def create_advanced_sidebar(datasets):
+    """Create an advanced sidebar with filters and controls"""
     
-    # API Status
-    st.markdown("""
-    <div class="api-status">
-        <strong>🔗 Live API Connection:</strong> This dashboard uses the official WA Gas Bulletin Board API 
-        for real-time data access. No web scraping required!
+    st.sidebar.markdown("""
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                padding: 1rem; border-radius: 10px; color: white; margin-bottom: 1rem;">
+        <h3 style="margin: 0; text-align: center;">🎛️ Control Center</h3>
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar controls
-    st.sidebar.header("🎛️ Dashboard Controls")
-    
-    # Date selector
-    st.sidebar.subheader("📅 Data Selection")
-    use_current = st.sidebar.checkbox("Use Current/Latest Data", value=True)
+    # Date range picker
+    st.sidebar.subheader("📅 Time Range")
+    date_range = st.sidebar.selectbox(
+        "Select Period",
+        ["Current/Live", "Last 24 Hours", "Last Week", "Last Month", "Custom Range"],
+        index=0
+    )
     
     selected_date = None
-    if not use_current:
+    if date_range == "Custom Range":
         selected_date = st.sidebar.date_input(
             "Select Gas Date",
             value=date.today() - timedelta(days=1),
             max_value=date.today()
         ).strftime('%Y-%m-%d')
     
-    # Data refresh
-    if st.sidebar.button("🔄 Refresh Data"):
+    # Refresh controls
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔄 Data Management")
+    
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        refresh_clicked = st.button("🔄 Refresh", use_container_width=True)
+    
+    with col2:
+        auto_refresh = st.checkbox("Auto-refresh", value=False)
+    
+    # System status
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📡 System Status")
+    
+    total_records = sum(len(df) for df in datasets.values() if not df.empty)
+    if total_records > 0:
+        st.sidebar.success(f"✅ Connected ({total_records:,} records)")
+    else:
+        st.sidebar.error("❌ No data available")
+    
+    # API endpoints status
+    with st.sidebar.expander("🔗 API Status"):
+        data_sources = {
+            'actual_flows': '🔄 Actual Flows',
+            'capacity_outlook': '⚡ Capacity',
+            'forecast_flows': '📈 Forecasts',
+            'end_user_consumption': '🏠 End Users',
+            'large_user_consumption': '🏭 Large Users',
+            'linepack_adequacy': '🔧 Linepack',
+            'trucked_gas': '🚛 Transport'
+        }
+        
+        for source, label in data_sources.items():
+            status = "🟢" if not datasets.get(source, pd.DataFrame()).empty else "🔴"
+            count = len(datasets.get(source, pd.DataFrame()))
+            st.write(f"{status} {label}: {count:,}")
+    
+    return selected_date, refresh_clicked
+
+def main():
+    # Apply advanced styling
+    apply_advanced_styling()
+    
+    # Create header
+    create_advanced_header()
+    
+    # Load data first for sidebar
+    with st.spinner('🚀 Loading data from WA GBB API...'):
+        datasets = get_all_current_data()
+    
+    # Create sidebar with filters
+    selected_date, refresh_clicked = create_advanced_sidebar(datasets)
+    
+    # Handle refresh
+    if refresh_clicked:
         st.cache_data.clear()
         st.rerun()
     
-    # Load data
-    with st.spinner('🚀 Loading data from WA GBB API...'):
-        if use_current:
-            datasets = get_all_current_data()
-        else:
+    # Reload data if date changed
+    if selected_date:
+        with st.spinner('🚀 Loading historical data...'):
             datasets = {
                 'actual_flows': get_actual_flows(selected_date),
                 'capacity_outlook': get_capacity_outlook(selected_date),
@@ -256,30 +409,34 @@ def main():
                 'trucked_gas': get_trucked_gas(selected_date)
             }
     
-    # Summary metrics
-    create_summary_metrics(datasets)
+    # Executive summary
+    create_executive_summary(datasets)
     
     # Data freshness indicator
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S AWST')
-    st.markdown(f'<p class="data-timestamp">📅 Dashboard updated: {current_time}</p>', 
-                unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="custom-info-box">
+        <strong>📅 Last Updated:</strong> {current_time} | 
+        <strong>🔄 Auto-refresh:</strong> Every 15 minutes | 
+        <strong>📡 Source:</strong> AEMO WA GBB API
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Main content tabs
+    # Enhanced tabs with better content
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Flow Analysis", "🔧 Capacity & Constraints", "🏭 Consumption Data", 
-        "📈 Forecasts", "🚛 Transportation", "📋 Raw Data"
+        "📊 Flow Analytics", "⚡ Capacity Management", "🏭 Consumption Insights", 
+        "📈 Forecasting", "🚛 Transportation", "📋 Data Explorer"
     ])
     
     with tab1:
-        st.markdown('<h2 class="sub-header">Gas Flow Analysis</h2>', unsafe_allow_html=True)
+        st.markdown('<h2 class="sub-header">Gas Flow Analytics</h2>', unsafe_allow_html=True)
         
         flows_df = datasets.get('actual_flows', pd.DataFrame())
-        
         if not flows_df.empty:
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                create_flow_chart(flows_df)
+                create_professional_flow_chart(flows_df)
             
             with col2:
                 st.subheader("📊 Flow Statistics")
@@ -298,7 +455,12 @@ def main():
             st.dataframe(flows_df.head(50), use_container_width=True)
             
         else:
-            st.info("🔄 No actual flow data available for the selected period.")
+            st.markdown("""
+            <div class="custom-warning-box">
+                <h4>⚠️ No Flow Data Available</h4>
+                <p>Flow data is temporarily unavailable. Please check back in a few minutes or contact system administrator.</p>
+            </div>
+            """, unsafe_allow_html=True)
     
     with tab2:
         st.markdown('<h2 class="sub-header">Capacity & Constraints</h2>', unsafe_allow_html=True)
@@ -474,20 +636,6 @@ def main():
                 """)
         else:
             st.warning("⚠️ No data available for download. Please check your API connection.")
-    
-    # Sidebar data status
-    st.sidebar.subheader("📊 Data Status")
-    for name, df in datasets.items():
-        status = "✅" if not df.empty else "⚠️"
-        count = len(df) if not df.empty else 0
-        st.sidebar.write(f"{status} {name.replace('_', ' ').title()}: {count:,} records")
-    
-    # API endpoints info
-    with st.sidebar.expander("🔗 API Endpoints Used"):
-        st.write("**Base URL:** https://gbbwa.aemo.com.au/api/v1/report/")
-        st.write("**Reports:**")
-        for report in api_client.REPORTS.values():
-            st.write(f"- {report}/current.csv")
 
 if __name__ == "__main__":
     main()
