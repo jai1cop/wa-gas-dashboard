@@ -1,0 +1,30 @@
+name: Deploy WA Gas Dashboard
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+    
+    - name: Install Playwright browsers
+      run: |
+        playwright install chromium
+        playwright install-deps  # Install system dependencies
+    
+    - name: Test scraping (optional)
+      run: |
+        python fetch_gbb_data.py
