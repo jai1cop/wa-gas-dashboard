@@ -514,22 +514,42 @@ def fetch_large_users_data():
 # ==============================================================================
 
 def create_facility_supply_demand_chart(production_df, demand_df, selected_facilities=None):
-    """Create supply by facility stacked area chart with demand overlay - FIXED VERSION"""
+    """Create supply by facility stacked area chart with demand overlay - DATE-FIXED VERSION"""
     
     # Data validation
     if production_df.empty or demand_df.empty:
         st.error("❌ No data available for chart generation")
         return go.Figure()
     
-    # Merge data on Date column
+    # FIX: Normalize dates to remove timestamp precision issues
+    production_df_clean = production_df.copy()
+    demand_df_clean = demand_df.copy()
+    
+    # Convert to date only (removes time component entirely)
+    production_df_clean['Date'] = pd.to_datetime(production_df_clean['Date']).dt.date
+    demand_df_clean['Date'] = pd.to_datetime(demand_df_clean['Date']).dt.date
+    
+    # Alternative fix: Round to nearest day
+    # production_df_clean['Date'] = pd.to_datetime(production_df_clean['Date']).dt.floor('D')
+    # demand_df_clean['Date'] = pd.to_datetime(demand_df_clean['Date']).dt.floor('D')
+    
+    # Merge data on normalized Date column
     try:
-        chart_data = production_df.merge(demand_df, on='Date', how='inner')
+        chart_data = production_df_clean.merge(demand_df_clean, on='Date', how='inner')
         if chart_data.empty:
-            st.error("❌ No matching dates between supply and demand data")
+            st.error("❌ No matching dates after normalization")
+            # Debug: Show sample dates
+            st.write("Production dates sample:", production_df_clean['Date'].head(3).tolist())
+            st.write("Demand dates sample:", demand_df_clean['Date'].head(3).tolist())
             return go.Figure()
+        else:
+            st.success(f"✅ Successfully merged {len(chart_data)} days of data")
     except Exception as e:
         st.error(f"❌ Data merge failed: {e}")
         return go.Figure()
+    
+    # Convert Date back to datetime for plotting
+    chart_data['Date'] = pd.to_datetime(chart_data['Date'])
     
     fig = go.Figure()
     
@@ -613,20 +633,6 @@ def create_facility_supply_demand_chart(production_df, demand_df, selected_facil
                          'Date: %{x|%Y-%m-%d}<br>' +
                          'Demand exceeds available capacity<extra></extra>'
         ))
-        
-        # Add annotations for first few deficits
-        for idx, (date, demand) in enumerate(zip(deficit_dates.head(3), deficit_demands.head(3))):
-            fig.add_annotation(
-                x=date,
-                y=demand,
-                text="⚠️ Capacity Shortfall",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor='red',
-                bgcolor='rgba(255,255,255,0.9)',
-                bordercolor='red',
-                borderwidth=1
-            )
     
     # Clean layout following Tufte's principles
     fig.update_layout(
@@ -663,10 +669,11 @@ def create_facility_supply_demand_chart(production_df, demand_df, selected_facil
             borderwidth=1
         ),
         height=600,
-        margin=dict(l=60, r=250, t=80, b=60)  # Extra right margin for legend
+        margin=dict(l=60, r=250, t=80, b=60)
     )
     
     return fig
+
 
 def create_storage_seasonality_chart(df):
     """Create storage inventory vs seasonal norms chart"""
