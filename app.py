@@ -2,14 +2,26 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from fetch_gbb_data import get_all_gbb_data
+from plotly.subplots import make_subplots
+from datetime import datetime, date, timedelta
 import json
-import os
-from datetime import datetime
 
-# Page config
+from fetch_gbb_data import (
+    get_all_current_data, 
+    get_actual_flows,
+    get_capacity_outlook, 
+    get_medium_term_capacity,
+    get_forecast_flows,
+    get_end_user_consumption,
+    get_large_user_consumption,
+    get_linepack_adequacy,
+    get_trucked_gas,
+    api_client
+)
+
+# Page configuration
 st.set_page_config(
-    page_title="WA Gas Market Dashboard",
+    page_title="WA Gas Market Dashboard", 
     page_icon="⛽",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -19,171 +31,131 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main-header {
-        font-size: 2.5rem;
+        font-size: 3rem;
         font-weight: bold;
         color: #1f77b4;
         text-align: center;
-        margin-bottom: 2rem;
+        margin: 1rem 0 2rem 0;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    }
+    .sub-header {
+        font-size: 1.5rem;
+        color: #2c3e50;
+        margin: 1rem 0;
+        padding: 0.5rem 0;
+        border-bottom: 2px solid #3498db;
     }
     .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 5px solid #1f77b4;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 0.5rem 0;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .last-updated {
-        color: #666;
-        font-size: 0.8rem;
+    .api-status {
+        background-color: #e8f5e8;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 5px solid #27ae60;
+        margin: 1rem 0;
+    }
+    .data-timestamp {
+        color: #7f8c8d;
+        font-size: 0.9rem;
         font-style: italic;
+        text-align: center;
+        margin-top: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=1800)  # Cache for 30 minutes
-def load_data():
-    """Load and cache WA GBB data"""
-    return get_all_gbb_data()
-
-def get_data_freshness():
-    """Check when data was last updated"""
-    try:
-        if os.path.exists('data/metadata.json'):
-            with open('data/metadata.json', 'r') as f:
-                metadata = json.load(f)
-            return metadata.get('last_run', 'Unknown')
-    except:
-        pass
-    return 'Unknown'
-
-def main():
-    # Header
-    st.markdown('<h1 class="main-header">⛽ WA Gas Market Dashboard</h1>', unsafe_allow_html=True)
+def create_summary_metrics(datasets):
+    """Create summary metrics from all datasets"""
+    col1, col2, col3, col4 = st.columns(4)
     
-    # Data freshness indicator
-    last_updated = get_data_freshness()
-    if last_updated != 'Unknown':
+    with col1:
+        flows_count = len(datasets.get('actual_flows', pd.DataFrame()))
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>🔄 Actual Flows</h3>
+            <h2>{flows_count:,}</h2>
+            <p>Records Available</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        capacity_count = len(datasets.get('capacity_outlook', pd.DataFrame()))
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>📊 Capacity Data</h3>
+            <h2>{capacity_count:,}</h2>
+            <p>Records Available</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        consumption_count = len(datasets.get('end_user_consumption', pd.DataFrame()))
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>🏭 Consumption</h3>
+            <h2>{consumption_count:,}</h2>
+            <p>Records Available</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        total_records = sum(len(df) for df in datasets.values() if not df.empty)
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>📈 Total Data</h3>
+            <h2>{total_records:,}</h2>
+            <p>Total Records</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+def create_flow_chart(flows_df):
+    """Create interactive flow visualization"""
+    if flows_df.empty:
+        st.warning("No flow data available for visualization")
+        return
+    
+    # Try to identify key columns for visualization
+    numeric_cols = flows_df.select_dtypes(include=['number']).columns.tolist()
+    
+    if not numeric_cols:
+        st.warning("No numeric data found for flow visualization")
+        return
+    
+    # Create time series if date column exists
+    date_cols = [col for col in flows_df.columns if 'date' in col.lower() or 'time' in col.lower()]
+    
+    if date_cols and len(numeric_cols) > 0:
         try:
-            last_updated_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
-            last_updated_str = last_updated_dt.strftime('%Y-%m-%d %H:%M:%S AWST')
-        except:
-            last_updated_str = last_updated
+            # Convert date column to datetime
+            flows_df[date_cols[0]] = pd.to_datetime(flows_df[date_cols[0]], errors='coerce')
+            
+            # Create line chart
+            fig = px.line(
+                flows_df.head(100),  # Limit to first 100 records for performance
+                x=date_cols[0],
+                y=numeric_cols[0],
+                title="Gas Flow Trends Over Time",
+                labels={date_cols[0]: "Date", numeric_cols[0]: "Flow Value"}
+            )
+            
+            fig.update_layout(
+                height=400,
+                xaxis_title="Time Period",
+                yaxis_title="Flow Value",
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Error creating flow chart: {e}")
+    
     else:
-        last_updated_str = 'Unknown'
-    
-    st.markdown(f'<p class="last-updated">📅 Data last updated: {last_updated_str}</p>', unsafe_allow_html=True)
-    
-    # Load data
-    with st.spinner('Loading WA Gas Bulletin Board data...'):
-        flows_df, capacity_df, storage_df = load_data()
-    
-    # Sidebar
-    st.sidebar.header("Dashboard Controls")
-    
-    # Data status
-    st.sidebar.subheader("📊 Data Status")
-    st.sidebar.metric("Daily Flows", f"{len(flows_df)} records")
-    st.sidebar.metric("Medium Term Capacity", f"{len(capacity_df)} records")
-    st.sidebar.metric("Storage Data", f"{len(storage_df)} records")
-    
-    # Main content tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Daily Flows", "🔧 Capacity Outlook", "🏭 Storage Data", "📋 Raw Data"])
-    
-    with tab1:
-        st.header("Daily Facility Flows")
-        
-        if not flows_df.empty:
-            # Create sample visualizations if data exists
-            if len(flows_df.columns) > 2:
-                # Try to create a chart with available data
-                numeric_columns = flows_df.select_dtypes(include=['number']).columns
-                if len(numeric_columns) > 0:
-                    fig = px.line(flows_df.head(100), 
-                                  title="Daily Gas Flows (Sample Data)",
-                                  height=400)
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            st.subheader("Recent Flow Data")
-            st.dataframe(flows_df.head(20), use_container_width=True)
-        else:
-            st.info("🔄 No daily flows data available. Data collection is in progress.")
-            st.markdown("""
-            **Note**: This dashboard loads data from automated scraping. If no data is visible:
-            1. The GitHub Actions workflow may still be running
-            2. The WA GBB website may be temporarily unavailable
-            3. Data format may have changed
-            """)
-    
-    with tab2:
-        st.header("Medium Term Capacity Outlook")
-        
-        if not capacity_df.empty:
-            st.subheader("Capacity Data")
-            st.dataframe(capacity_df.head(20), use_container_width=True)
-            
-            # Try to create visualization if numeric data exists
-            numeric_columns = capacity_df.select_dtypes(include=['number']).columns
-            if len(numeric_columns) > 0:
-                fig = px.bar(capacity_df.head(10), 
-                             title="Medium Term Capacity Overview",
-                             height=400)
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("🔄 No capacity data available. Data collection is in progress.")
-    
-    with tab3:
-        st.header("Storage Facility Data")
-        
-        if not storage_df.empty:
-            st.subheader("Storage Information")
-            st.dataframe(storage_df.head(20), use_container_width=True)
-        else:
-            st.info("🔄 No storage data available. Data collection is in progress.")
-    
-    with tab4:
-        st.header("Raw Data Export")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if not flows_df.empty:
-                csv_flows = flows_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Flows Data",
-                    data=csv_flows,
-                    file_name=f"wa_gas_flows_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-        
-        with col2:
-            if not capacity_df.empty:
-                csv_capacity = capacity_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Capacity Data",
-                    data=csv_capacity,
-                    file_name=f"wa_gas_capacity_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-        
-        with col3:
-            if not storage_df.empty:
-                csv_storage = storage_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Storage Data",
-                    data=csv_storage,
-                    file_name=f"wa_gas_storage_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-        
-        # Show all raw data
-        if st.checkbox("Show all raw data"):
-            st.subheader("Flows Data")
-            st.dataframe(flows_df)
-            
-            st.subheader("Capacity Data")
-            st.dataframe(capacity_df)
-            
-            st.subheader("Storage Data")
-            st.dataframe(storage_df)
-
-if __name__ == "__main__":
-    main()
+        # Create bar
