@@ -359,6 +359,35 @@ def make_enhanced_api_request(url, params=None, timeout=30, retries=3):
             continue
     
     return None, last_error, None
+def is_html_response(response_text):
+    """Check if response is HTML instead of CSV"""
+def is_html_response(response_text):
+    """Check if response is HTML instead of CSV"""
+    
+    # Convert to string and get first 200 characters
+    text_start = str(response_text)[:200].lower().strip()
+    
+    # HTML indicators
+    html_indicators = [
+        '<!doctype html',
+        '<html',
+        '<head>',
+        '<body>',
+        '<!--',
+        '</html>',
+        'content-type: text/html'
+    ]
+    
+    # Check for HTML patterns
+    for indicator in html_indicators:
+        if indicator in text_start:
+            return True
+    
+    # Additional check: if it starts with < and contains HTML-like tags
+    if text_start.startswith('<') and any(tag in text_start for tag in ['<html', '<head', '<body', '<div']):
+        return True
+    
+    return False
 
 def check_data_source_availability():
     """Comprehensive check of all data source availability"""
