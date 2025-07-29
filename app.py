@@ -385,282 +385,211 @@ def check_data_source_availability():
 # ==============================================================================
 
 @st.cache_data(ttl=3600)
-@st.cache_data(ttl=3600)
-def fetch_medium_term_capacity_data_csv_first():
-    """Enhanced capacity data fetching with HTML detection"""
+def fetch_aemo_official_medium_term_capacity():
+    """Fetch from official AEMO GBB WA API endpoints (no authentication required)"""
     
-    csv_endpoints = [
-        "https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current.csv",
-        "https://aemo.com.au/aemo/data/wa/gbb/capacity/current.csv",
-        "https://data.aemo.com.au/gas/wa/capacity/medium-term-outlook.csv",
-        "https://www.aemo.com.au/-/media/files/gas/gbb/wa-medium-term-capacity.csv",
-        "https://aemo.com.au/-/media/files/gas/gbb/data/medium-term-capacity-outlook.csv"
+    # Official AEMO GBB WA endpoints from API documentation v3.0
+    official_endpoints = [
+        # Production system (live data)
+        "https://gbbwa.aemo.com.au/api/v1/report/mediumTermCapacity/current.csv",
+        "https://gbbwa.aemo.com.au/api/v1/report/mediumTermCapacity/current",
+        
+        # Trial system (for testing)
+        "https://gbbwa-trial.aemo.com.au/api/v1/report/mediumTermCapacity/current.csv",
+        "https://gbbwa-trial.aemo.com.au/api/v1/report/mediumTermCapacity/current"
     ]
     
-    st.info("🔄 Testing CSV endpoints with enhanced HTML detection...")
+    st.info("🔄 Using official AEMO GBB WA API endpoints...")
     
-    for endpoint in csv_endpoints:
+    for endpoint in official_endpoints:
         try:
-            with st.spinner(f"📊 Testing {endpoint.split('/')[-1]}..."):
-                data, error, content_type = make_enhanced_api_request(endpoint)
-            
-            if data and not error:
-                # Check if response is HTML instead of CSV
-                if is_html_response(data):
-                    st.warning(f"⚠️ {endpoint.split('/')[-1]} returned HTML (likely 404/auth error)")
-                    continue
+            with st.spinner(f"📊 Testing official endpoint: {endpoint.split('/')[-1]}..."):
                 
-                # Try to process as CSV
-                try:
-                    capacity_df = process_medium_term_capacity_csv_robust(data)
-                    if not capacity_df.empty:
-                        st.success(f"✅ Successfully loaded capacity data from {endpoint.split('/')[-1]}")
-                        return capacity_df, None
-                except Exception as e:
-                    st.warning(f"⚠️ CSV processing failed for {endpoint.split('/')[-1]}: {e}")
-                    continue
-            else:
-                st.warning(f"⚠️ API request failed for {endpoint.split('/')[-1]}: {error}")
+                # Official headers as per AEMO documentation
+                headers = {
+                    'User-Agent': 'WA-Gas-Dashboard/1.0',
+                    'Accept': 'text/csv,application/json',
+                    'Accept-Encoding': 'gzip, deflate'
+                }
+                
+                response = requests.get(endpoint, headers=headers, timeout=30, verify=True)
+                
+                if response.status_code == 200:
+                    content_type = response.headers.get('content-type', '').lower()
                     
-        except Exception as e:
-            st.warning(f"⚠️ Endpoint failed: {endpoint.split('/')[-1]} - {str(e)[:50]}...")
+                    if endpoint.endswith('.csv') or 'csv' in content_type:
+                        # Process CSV data
+                        if not is_html_response(response.text):
+                            st.success(f"✅ SUCCESS: Official AEMO endpoint working!")
+                            
+                            capacity_df = process_official_aemo_csv(response.text)
+                            if not capacity_df.empty:
+                                st.success(f"🎉 Loaded {len(capacity_df)} facilities from official AEMO GBB WA API!")
+                                return capacity_df, None
+                        else:
+                            st.warning(f"⚠️ Endpoint returned HTML (may not be live yet)")
+                    else:
+                        # Process JSON data
+                        try:
+                            json_data = response.json()
+                            capacity_df = process_official_aemo_json(json_data)
+                            if not capacity_df.empty:
+                                st.success(f"🎉 Loaded {len(capacity_df)} facilities from official AEMO JSON API!")
+                                return capacity_df, None
+                        except:
+                            st.warning(f"⚠️ Could not parse JSON response")
+                            
+                elif response.status_code == 404:
+                    st.info(f"📋 {endpoint.split('/')[-1]}: Endpoint not found (may not be commissioned yet)")
+                elif response.status_code == 500:
+                    st.warning(f"⚠️ {endpoint.split('/')[-1]}: Server error")
+                else:
+                    st.warning(f"⚠️ {endpoint.split('/')[-1]}: HTTP {response.status_code}")
+                    
+        except requests.exceptions.RequestException as e:
+            st.warning(f"⚠️ Connection failed: {str(e)[:50]}...")
             continue
     
-    # Enhanced fallback with better messaging
-    st.info("📊 All CSV endpoints returned HTML or failed - using GSOO 2024 baseline")
-    return create_fallback_capacity_data_enhanced(), "All endpoints returned HTML or failed"
+    # Fallback with explanation
+    st.info("📊 Official AEMO endpoints may not be commissioned yet - using GSOO 2024 baseline")
+    return create_fallback_capacity_data_with_official_context(), "Official endpoints not yet live"
 
-
-def process_medium_term_capacity_csv_robust(csv_data):
-    """Enhanced CSV processing with robust error handling and HTML detection"""
-    
-    # First, check if response is HTML instead of CSV
-    if is_html_response(csv_data):
-        st.error("❌ API returned HTML error page instead of CSV data")
-        st.warning("🔍 This typically indicates the API endpoint is unavailable or requires authentication")
-        
-        with st.expander("🔍 HTML Response Analysis", expanded=False):
-            st.write("**Response type:** HTML error page")
-            st.code(csv_data[:500] + "..." if len(csv_data) > 500 else csv_data)
-        
-        return pd.DataFrame()
+def process_official_aemo_csv(csv_data):
+    """Process official AEMO CSV format as per API documentation"""
     
     try:
-        # Method 1: Standard pandas parsing with modern parameters
+        # Parse CSV using official format from AEMO documentation
         df = pd.read_csv(StringIO(csv_data))
-        st.success("✅ Standard CSV parsing successful")
-        return process_csv_data_standard(df)
         
-    except pd.errors.ParserError as e:
-        st.warning(f"⚠️ Standard CSV parsing failed: {str(e)[:100]}...")
+        st.info("📋 Processing official AEMO Medium Term Capacity CSV format")
         
-        # Method 2: Robust parsing with updated pandas parameters
-        try:
-            # Use modern pandas parameters (compatible with pandas 1.3+)
-            import pandas as pd
-            pandas_version = pd.__version__
+        with st.expander("🔍 Official AEMO CSV Structure", expanded=False):
+            st.write(f"**Columns:** {list(df.columns)}")
+            st.write(f"**Rows:** {len(df)}")
+            st.dataframe(df.head(3))
+        
+        # Expected columns from AEMO API documentation Table 46
+        expected_columns = {
+            'rowId': 'row_id',
+            'gasDay': 'gas_day', 
+            'facilityCode': 'facility_code',
+            'facilityName': 'facility_name',
+            'startGasDay': 'start_gas_day',
+            'endGasDay': 'end_gas_day',
+            'capacityType': 'capacity_type',
+            'description': 'description',
+            'capacity': 'capacity'
+        }
+        
+        # Map columns to standard format
+        column_mapping = {}
+        for col in df.columns:
+            for expected, standard in expected_columns.items():
+                if col.lower() == expected.lower():
+                    column_mapping[col] = standard
+                    break
+        
+        if 'facility_code' not in column_mapping.values() or 'capacity' not in column_mapping.values():
+            st.error("❌ Required columns missing from official AEMO CSV")
+            return pd.DataFrame()
+        
+        # Rename columns
+        df_mapped = df.rename(columns=column_mapping)
+        
+        # Process capacity data
+        df_mapped['capacity'] = pd.to_numeric(df_mapped['capacity'], errors='coerce')
+        df_mapped = df_mapped.dropna(subset=['capacity'])
+        df_mapped = df_mapped[df_mapped['capacity'] > 0]
+        
+        # Map to dashboard facilities
+        capacity_records = []
+        
+        for _, row in df_mapped.iterrows():
+            facility_code = str(row.get('facility_code', '')).strip()
+            facility_name = str(row.get('facility_name', facility_code)).strip()
+            capacity = row.get('capacity', 0)
+            capacity_type = str(row.get('capacity_type', 'NAMEPLATE')).strip()
+            description = str(row.get('description', 'Official AEMO Data')).strip()
             
-            if pd.__version__ >= '1.3.0':
-                # Modern pandas syntax
-                df = pd.read_csv(
-                    StringIO(csv_data),
-                    on_bad_lines='skip',      # Modern parameter name
-                    engine='python'           # Use Python engine for better error handling
-                )
-            else:
-                # Legacy pandas syntax
-                df = pd.read_csv(
-                    StringIO(csv_data),
-                    error_bad_lines=False,    # Legacy parameter
-                    warn_bad_lines=True,      # Legacy parameter
-                    engine='python'
-                )
+            # Map to dashboard facility names
+            dashboard_facility = map_facility_code_to_dashboard_name(facility_code, facility_name)
             
-            st.info(f"🔧 Using robust CSV parsing with pandas {pandas_version} (skipped bad lines)")
-            return process_csv_data_standard(df)
+            if dashboard_facility and capacity > 0:
+                capacity_records.append({
+                    'dashboard_facility': dashboard_facility,
+                    'facility_code': facility_code,
+                    'facility_name': facility_name,
+                    'capacity_tj_day': capacity,
+                    'capacity_type': capacity_type,
+                    'description': f"Official AEMO: {description}",
+                    'effective_date': row.get('start_gas_day', '2024-01-01')
+                })
+        
+        if capacity_records:
+            capacity_df = pd.DataFrame(capacity_records)
             
-        except Exception as e2:
-            st.warning(f"⚠️ Robust CSV parsing failed: {str(e2)[:100]}...")
+            # Get latest capacity for each facility
+            latest_capacity = capacity_df.groupby('dashboard_facility').agg({
+                'capacity_tj_day': 'last',
+                'capacity_type': 'last',
+                'description': 'last',
+                'effective_date': 'last'
+            }).reset_index()
             
-            # Method 3: Manual line-by-line parsing
-            return parse_csv_manually_enhanced(csv_data)
-
-def is_html_response(response_text):
-    """Check if response is HTML instead of CSV"""
-    
-    # Convert to string and get first 200 characters
-    text_start = str(response_text)[:200].lower().strip()
-    
-    # HTML indicators
-    html_indicators = [
-        '<!doctype html',
-        '<html',
-        '<head>',
-        '<body>',
-        '<!--',
-        '</html>',
-        'content-type: text/html'
-    ]
-    
-    # Check for HTML patterns
-    for indicator in html_indicators:
-        if indicator in text_start:
-            return True
-    
-    # Additional check: if it starts with < and contains HTML-like tags
-    if text_start.startswith('<') and any(tag in text_start for tag in ['<html', '<head', '<body', '<div']):
-        return True
-    
-    return False
-
-def parse_csv_manually_enhanced(csv_data):
-    """Enhanced manual CSV parsing with better error handling"""
-    
-    st.info("🔧 Attempting enhanced manual CSV parsing...")
-    
-    # Check if data looks like the expected CSV format
-    if not validate_csv_format(csv_data):
-        return pd.DataFrame()
-    
-    lines = csv_data.strip().split('\n')
-    
-    # Enhanced debugging with HTML detection
-    with st.expander("🔍 Enhanced CSV Data Analysis", expanded=False):
-        st.write(f"**Total lines:** {len(lines)}")
-        
-        # Check for HTML content
-        html_lines = [i for i, line in enumerate(lines[:10]) if '<' in line and '>' in line]
-        if html_lines:
-            st.error(f"**HTML detected in lines:** {html_lines}")
-            st.write("**This confirms the API is returning HTML instead of CSV**")
-        
-        # Show expected vs actual format
-        st.markdown("**Expected CSV format:**")
-        st.code("rowId,gasDay,facilityCode,facilityName,startGasDay,endGasDay,capacityType,description,capacity")
-        st.code("1,2012-12-30,STOR1,Storage Facility 1,2012-12-29,2012-12-30,PRODUCTION,Maximum flow testing,0")
-        
-        st.markdown("**Actual response format:**")
-        for i, line in enumerate(lines[:5]):
-            st.code(f"Line {i+1}: {line}")
-    
-    # If HTML detected, return empty DataFrame
-    if any('<html' in line.lower() or '<!doctype' in line.lower() for line in lines[:5]):
-        st.error("❌ Confirmed: API response is HTML, not CSV data")
-        return pd.DataFrame()
-    
-    # Try to find CSV header line
-    header_line = None
-    data_start = 0
-    
-    for i, line in enumerate(lines):
-        # Look for a line that matches expected CSV header pattern
-        if 'facilityCode' in line or 'capacity' in line or line.count(',') >= 5:
-            header_line = line
-            data_start = i
-            break
-    
-    if not header_line:
-        st.error("❌ Could not find valid CSV header in response")
-        return pd.DataFrame()
-    
-    st.info(f"📋 Found CSV header at line {data_start + 1}: {header_line}")
-    
-    # Parse header
-    header = [col.strip().strip('"\'') for col in header_line.split(',')]
-    
-    # Parse data lines
-    valid_rows = []
-    expected_cols = len(header)
-    
-    for i, line in enumerate(lines[data_start + 1:], start=data_start + 2):
-        if line.strip():  # Skip empty lines
-            cols = line.split(',')
+            st.success(f"✅ Processed official AEMO data for {len(latest_capacity)} WA facilities")
+            return latest_capacity
+        else:
+            st.warning("⚠️ No WA facilities found in official AEMO data")
+            return pd.DataFrame()
             
-            # Handle rows with correct number of columns
-            if len(cols) == expected_cols:
-                cleaned_cols = [col.strip().strip('"\'') for col in cols]
-                valid_rows.append(cleaned_cols)
-            else:
-                st.warning(f"⚠️ Skipping line {i}: expected {expected_cols} cols, got {len(cols)}")
-    
-    if not valid_rows:
-        st.error("❌ No valid CSV data rows found")
-        return pd.DataFrame()
-    
-    # Create DataFrame
-    try:
-        df = pd.DataFrame(valid_rows, columns=header)
-        st.success(f"✅ Manual parsing successful: {len(df)} valid rows extracted from CSV data")
-        return process_csv_data_standard(df)
-        
     except Exception as e:
-        st.error(f"❌ Manual parsing failed: {e}")
+        st.error(f"❌ Official AEMO CSV processing failed: {e}")
         return pd.DataFrame()
 
-def validate_csv_format(csv_data):
-    """Validate if data looks like expected CSV format"""
+def process_official_aemo_json(json_data):
+    """Process official AEMO JSON format as per API documentation"""
     
-    # Check for expected CSV columns
-    expected_columns = ['facilityCode', 'facilityName', 'capacity', 'gasDay']
-    
-    # Convert to lowercase for case-insensitive matching
-    data_lower = csv_data.lower()
-    
-    # Check if at least some expected columns are present
-    found_columns = sum(1 for col in expected_columns if col.lower() in data_lower)
-    
-    if found_columns >= 2:  # At least 2 expected columns found
-        st.info(f"🔍 Found {found_columns}/{len(expected_columns)} expected CSV columns")
-        return True
-    else:
-        st.warning(f"⚠️ Only found {found_columns}/{len(expected_columns)} expected CSV columns")
-        st.info("💡 This suggests the API response is not in the expected CSV format")
-        return False
-
-def create_fallback_capacity_data_enhanced():
-    """Enhanced fallback with better messaging about API issues"""
-    
-    st.info("📊 **Using GSOO 2024 Static Capacity Values**")
-    st.markdown("""
-    **Why we're using static data:**
-    - Medium Term Capacity API endpoints are returning HTML error pages
-    - This typically indicates authentication requirements or API unavailability
-    - GSOO 2024 provides official AEMO capacity forecasts as reliable baseline
-    """)
-    
-    capacity_data = []
-    for facility, config in WA_PRODUCTION_FACILITIES.items():
-        capacity_data.append({
-            'dashboard_facility': facility,
-            'facility_code': config.get('gbb_facility_code', ''),
-            'facility_name': facility,
-            'capacity_tj_day': config['max_domestic_capacity'],
-            'capacity_type': 'GSOO_2024',
-            'description': 'GSOO 2024 Baseline (API returned HTML)',
-            'effective_date': '2024-01-01'
-        })
-    
-    return pd.DataFrame(capacity_data)
-
-def update_facility_capacities_with_api_data(capacity_df):
-    """Update WA_PRODUCTION_FACILITIES with real API capacity data"""
-    
-    updated_facilities = WA_PRODUCTION_FACILITIES.copy()
-    
-    for _, row in capacity_df.iterrows():
-        facility_name = row['dashboard_facility']
-        real_capacity = row['capacity_tj_day']
-        capacity_type = row['capacity_type']
+    try:
+        # JSON format from AEMO documentation Section 4.10
+        if 'rows' not in json_data:
+            st.error("❌ Invalid AEMO JSON format - missing 'rows' field")
+            return pd.DataFrame()
         
-        if facility_name in updated_facilities:
-            updated_facilities[facility_name]['max_domestic_capacity'] = real_capacity
-            updated_facilities[facility_name]['api_capacity_type'] = capacity_type
-            updated_facilities[facility_name]['capacity_source'] = 'Medium Term Capacity API'
-            updated_facilities[facility_name]['last_updated'] = datetime.now()
+        rows = json_data['rows']
+        st.success(f"📊 Processing {len(rows)} rows from official AEMO JSON")
+        
+        capacity_records = []
+        
+        for row in rows:
+            facility_code = row.get('facilityCode', '')
+            facility_name = row.get('facilityName', '')
+            capacity = row.get('capacity', 0)
+            capacity_type = row.get('capacityType', '')
+            description = row.get('description', '')
             
-            st.success(f"✅ Updated {facility_name}: {real_capacity} TJ/day ({capacity_type})")
-    
-    return updated_facilities
+            # Map to dashboard facility names
+            dashboard_facility = map_facility_code_to_dashboard_name(facility_code, facility_name)
+            
+            if dashboard_facility and capacity > 0:
+                capacity_records.append({
+                    'dashboard_facility': dashboard_facility,
+                    'facility_code': facility_code,
+                    'facility_name': facility_name,
+                    'capacity_tj_day': capacity,
+                    'capacity_type': capacity_type,
+                    'description': f"Official AEMO: {description}",
+                    'effective_date': row.get('startGasDay', '2024-01-01')
+                })
+        
+        if capacity_records:
+            return pd.DataFrame(capacity_records)
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ Official AEMO JSON processing failed: {e}")
+        return pd.DataFrame()
+
 
 # ==============================================================================
 # PRODUCTION DATA FETCHING WITH ENHANCED FALLBACKS
@@ -671,7 +600,7 @@ def fetch_real_production_facility_data_with_capacity_api():
     """Enhanced production data with real Medium Term Capacity constraints"""
     
     # First, get real capacity data
-    capacity_df, capacity_error = fetch_medium_term_capacity_data_csv_first()
+    capacity_df, capacity_error = fetch_aemo_official_medium_term_capacity()
     
     # Update facility configurations with real capacity data
     if capacity_df is not None and not capacity_df.empty:
@@ -1316,7 +1245,7 @@ def display_enhanced_command_center():
     with st.spinner("🔄 Loading comprehensive market data from multiple sources..."):
         production_df, prod_error = fetch_real_production_facility_data_with_capacity_api()
         demand_df, demand_error = fetch_real_market_demand_data_enhanced()
-        capacity_df, capacity_error = fetch_medium_term_capacity_data_csv_first()
+        capacity_df, capacity_error = fetch_aemo_official_medium_term_capacity()
         news_items = fetch_real_news_feed_enhanced()
     
     # Enhanced API Status Summary
@@ -1719,7 +1648,7 @@ def display_enhanced_facility_capacity_analysis():
     st.markdown("*Enhanced with CSV-first Medium Term Capacity API integration*")
     
     # Fetch real capacity data using CSV-first approach
-    capacity_df, capacity_error = fetch_medium_term_capacity_data_csv_first()
+    capacity_df, capacity_error = fetch_aemo_official_medium_term_capacity()
     
     col1, col2 = st.columns([2, 1])
     
