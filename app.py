@@ -413,6 +413,76 @@ def check_data_source_availability():
 # MEDIUM TERM CAPACITY API INTEGRATION (CSV-FIRST)
 # ==============================================================================
 
+def is_html_response(response_text):
+    """Check if response is HTML instead of CSV"""
+    
+    # Convert to string and get first 200 characters
+    text_start = str(response_text)[:200].lower().strip()
+    
+    # HTML indicators
+    html_indicators = [
+        '<!doctype html',
+        '<html',
+        '<head>',
+        '<body>',
+        '<!--',
+        '</html>',
+        'content-type: text/html'
+    ]
+    
+    # Check for HTML patterns
+    for indicator in html_indicators:
+        if indicator in text_start:
+            return True
+    
+    # Additional check: if it starts with < and contains HTML-like tags
+    if text_start.startswith('<') and any(tag in text_start for tag in ['<html', '<head', '<body', '<div']):
+        return True
+    
+    return False
+
+def create_fallback_capacity_data_with_official_context():
+    """Enhanced fallback with official AEMO context"""
+    
+    st.info("📊 **Using GSOO 2024 Static Capacity Values**")
+    st.markdown("""
+    **Why we're using static data:**
+    - Official AEMO GBB WA endpoints (`gbbwa.aemo.com.au`) may not be commissioned yet
+    - Testing both production and trial systems for availability
+    - GSOO 2024 provides reliable baseline capacity data from official AEMO forecasts
+    """)
+    
+    capacity_data = []
+    for facility, config in WA_PRODUCTION_FACILITIES.items():
+        capacity_data.append({
+            'dashboard_facility': facility,
+            'facility_code': config.get('gbb_facility_code', ''),
+            'facility_name': facility,
+            'capacity_tj_day': config['max_domestic_capacity'],
+            'capacity_type': 'GSOO_2024',
+            'description': 'GSOO 2024 Baseline (Official AEMO endpoints may not be live yet)',
+            'effective_date': '2024-01-01'
+        })
+    
+    return pd.DataFrame(capacity_data)
+
+def validate_csv_format(csv_data):
+    """Validate if data looks like expected CSV format"""
+    
+    # Check for expected CSV columns
+    expected_columns = ['facilityCode', 'facilityName', 'capacity', 'gasDay']
+    
+    # Convert to lowercase for case-insensitive matching
+    data_lower = csv_data.lower()
+    
+    # Check if at least some expected columns are present
+    found_columns = sum(1 for col in expected_columns if col.lower() in data_lower)
+    
+    if found_columns >= 2:  # At least 2 expected columns found
+        return True
+    else:
+        return False
+
 @st.cache_data(ttl=3600)
 def fetch_aemo_official_medium_term_capacity():
     """Fetch from official AEMO GBB WA API endpoints (no authentication required)"""
@@ -618,6 +688,7 @@ def process_official_aemo_json(json_data):
     except Exception as e:
         st.error(f"❌ Official AEMO JSON processing failed: {e}")
         return pd.DataFrame()
+
 
 
 # ==============================================================================
