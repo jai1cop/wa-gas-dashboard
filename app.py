@@ -6,6 +6,12 @@ from plotly.subplots import make_subplots
 from datetime import datetime, date, timedelta
 import json
 
+def has_data(obj):
+    """Helper function to safely check if pandas objects have data"""
+    if hasattr(obj, '__len__'):
+        return len(obj) > 0
+    return bool(obj)
+
 from fetch_gbb_data import (
     get_all_current_data, 
     get_actual_flows,
@@ -124,14 +130,14 @@ def create_flow_chart(flows_df):
     # Try to identify key columns for visualization
     numeric_cols = flows_df.select_dtypes(include=['number']).columns.tolist()
     
-    if not numeric_cols:
+    if len(numeric_cols) == 0:
         st.warning("No numeric data found for flow visualization")
         return
     
     # Create time series if date column exists
     date_cols = [col for col in flows_df.columns if 'date' in col.lower() or 'time' in col.lower()]
     
-    if date_cols and len(numeric_cols) > 0:
+    if len(date_cols) > 0 and len(numeric_cols) > 0:
         try:
             # Convert date column to datetime
             flows_df[date_cols[0]] = pd.to_datetime(flows_df[date_cols[0]], errors='coerce')
@@ -344,7 +350,7 @@ def main():
             numeric_cols = forecast_df.select_dtypes(include=['number']).columns
             date_cols = [col for col in forecast_df.columns if 'date' in col.lower()]
             
-            if numeric_cols and date_cols:
+            if len(numeric_cols) > 0 and len(date_cols) > 0:
                 try:
                     forecast_df[date_cols[0]] = pd.to_datetime(forecast_df[date_cols[0]], errors='coerce')
                     
