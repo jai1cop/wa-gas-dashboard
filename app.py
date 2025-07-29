@@ -1883,13 +1883,14 @@ def main():
                 for source, status in new_availability.items():
                     st.write(f"{'✅' if status else '❌'} {source.replace('_', ' ')}")
         
-        if st.button("🏭 Test CSV Capacity API"):
+             if st.button("🏭 Test CSV Capacity API"):
             with st.spinner("Testing Medium Term Capacity API (CSV-first)..."):
-                capacity_df, error = fetch_medium_term_capacity_data_csv_first()
+                # Use the official AEMO function we defined earlier
+                capacity_df, error = fetch_aemo_official_medium_term_capacity()
                 if error is None:
-                    st.success(f"✅ CSV/API Connected - {len(capacity_df)} facilities loaded")
+                    st.success(f"✅ Official AEMO API Connected - {len(capacity_df)} facilities loaded")
                 else:
-                    st.error(f"❌ CSV/API Error: {error}")
+                    st.error(f"❌ Official AEMO API Error: {error}")
         
         # Performance metrics
         st.markdown("---")
