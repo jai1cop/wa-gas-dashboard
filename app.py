@@ -224,7 +224,7 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating'
     },
     'Varanus Island': {
-        'operator': 'Santos/Beach/APA',
+        'operator': 'Santos',
         'max_domestic_capacity': 390,
         'color': 'rgba(148, 103, 189, 0.7)',
         'status': 'operating'
@@ -236,7 +236,7 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating'
     },
     'Devil Creek': {
-        'operator': 'Santos/Beach',
+        'operator': 'Santos',
         'max_domestic_capacity': 50,
         'color': 'rgba(227, 119, 194, 0.7)',
         'status': 'declining'
@@ -481,7 +481,7 @@ def fetch_large_users_data():
         "Alcoa Kwinana Refinery", "Alcoa Pinjarra Refinery", "Alcoa Wagerup Refinery",
         "BHP Nickel West Kalgoorlie", "BHP Nickel West Kambalda", "Tianqi Lithium Kwinana",
         "CSBP Kwinana Ammonia", "Wesfarmers CSBP Chemicals", "Burrup Fertilisers Karratha",
-        "Yara Pilbara Ammonia", "Cockburn Cement", "Adelaide Brighton Munster",
+        "Yara Pilbara Fertilisers", "Cockburn Cement", "Adelaide Brighton Munster",
         
         # Gas Production & Infrastructure
         "Apache Varanus Island", "Woodside North Rankin Complex", "Woodside Goodwyn Alpha",
