@@ -9,6 +9,7 @@ import requests
 import json
 import math
 from io import StringIO
+import time
 
 # Graceful dependency handling
 try:
@@ -16,12 +17,9 @@ try:
     FEEDPARSER_AVAILABLE = True
 except ImportError:
     FEEDPARSER_AVAILABLE = False
-    
+
 import warnings
 warnings.filterwarnings('ignore')
-
-# Add this global variable near the top after imports
-FEEDPARSER_AVAILABLE = True
 
 # ==============================================================================
 # PAGE CONFIGURATION & STYLING
@@ -45,7 +43,7 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     
-    /* KPI Cards - Progressive Disclosure */
+    /* KPI Cards */
     .kpi-card {
         background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
         border: 1px solid #e2e8f0;
@@ -79,7 +77,7 @@ st.markdown("""
         margin-top: 0.5rem;
     }
     
-    /* News Feed Styling with Clickable Links */
+    /* News Feed Styling */
     .news-item {
         display: flex;
         align-items: flex-start;
@@ -111,6 +109,33 @@ st.markdown("""
     .sentiment-positive { color: #16a34a; font-weight: 700; }
     .sentiment-negative { color: #dc2626; font-weight: 700; }
     .sentiment-neutral { color: #64748b; font-weight: 700; }
+    
+    /* API Status Indicators */
+    .api-status {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin: 0.25rem;
+    }
+    
+    .api-live { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .api-cached { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .api-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    .api-fallback { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+    
+    /* Data Quality Indicators */
+    .data-quality {
+        padding: 0.5rem;
+        border-radius: 6px;
+        margin: 0.5rem 0;
+        font-size: 0.875rem;
+    }
+    
+    .quality-real { background: #dcfce7; color: #166534; }
+    .quality-estimate { background: #fef3c7; color: #92400e; }
+    .quality-fallback { background: #f3f4f6; color: #374151; }
     
     /* Market Structure Pills */
     .structure-pill {
@@ -146,58 +171,15 @@ st.markdown("""
     .status-watch { color: #ca8a04; }
     .status-critical { color: #dc2626; }
     
-    /* Enhanced API Status Indicators */
-    .api-status {
-        display: inline-block;
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        margin: 0.25rem;
-    }
-    
-    .api-live { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-    .api-cached { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-    .api-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-    .api-fallback { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
-    
-    /* Data Quality Indicators */
-    .data-quality {
-        padding: 0.5rem;
-        border-radius: 6px;
-        margin: 0.5rem 0;
-        font-size: 0.875rem;
-    }
-    
-    .quality-real { background: #dcfce7; color: #166534; }
-    .quality-estimate { background: #fef3c7; color: #92400e; }
-    .quality-fallback { background: #f3f4f6; color: #374151; }
-    
-    /* Maximize Data-Ink Ratio */
+    /* Hide Streamlit elements */
     .stPlotlyChart > div > div > div > div.modebar {
         display: none !important;
-    }
-    
-    /* Enhanced Loading Indicators */
-    .loading-spinner {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid #f3f3f3;
-        border-radius: 50%;
-        border-top: 3px solid #3498db;
-        animation: spin 1s linear infinite;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# WA GAS PRODUCTION FACILITIES CONFIGURATION (Enhanced with Real Mappings)
+# WA GAS PRODUCTION FACILITIES CONFIGURATION
 # ==============================================================================
 
 WA_PRODUCTION_FACILITIES = {
@@ -208,7 +190,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'KARR_GP',
         'typical_output': 450,
-        'region': 'North West Shelf'
+        'region': 'North West Shelf',
+        'capacity_source': 'GSOO 2024'
     },
     'Gorgon': {
         'operator': 'Chevron',
@@ -217,7 +200,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'GORG_GP',
         'typical_output': 280,
-        'region': 'North West Shelf'
+        'region': 'North West Shelf',
+        'capacity_source': 'GSOO 2024'
     },
     'Wheatstone': {
         'operator': 'Chevron',
@@ -226,7 +210,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'WHET_GP',
         'typical_output': 210,
-        'region': 'North West Shelf'
+        'region': 'North West Shelf',
+        'capacity_source': 'GSOO 2024'
     },
     'Pluto': {
         'operator': 'Woodside',
@@ -235,7 +220,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'PLUT_GP',
         'typical_output': 35,
-        'region': 'North West Shelf'
+        'region': 'North West Shelf',
+        'capacity_source': 'GSOO 2024'
     },
     'Varanus Island': {
         'operator': 'Santos/Beach/APA',
@@ -244,7 +230,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'VARN_GP',
         'typical_output': 340,
-        'region': 'North West Shelf'
+        'region': 'North West Shelf',
+        'capacity_source': 'GSOO 2024'
     },
     'Macedon': {
         'operator': 'Woodside/Santos',
@@ -253,7 +240,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'MCED_GP',
         'typical_output': 155,
-        'region': 'North West Shelf'
+        'region': 'North West Shelf',
+        'capacity_source': 'GSOO 2024'
     },
     'Devil Creek': {
         'operator': 'Santos/Beach',
@@ -262,7 +250,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'declining',
         'gbb_facility_code': 'DVCR_GP',
         'typical_output': 25,
-        'region': 'Perth Basin'
+        'region': 'Perth Basin',
+        'capacity_source': 'GSOO 2024'
     },
     'Beharra Springs': {
         'operator': 'Beach/Mitsui',
@@ -271,7 +260,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'BEHA_GP',
         'typical_output': 24,
-        'region': 'Perth Basin'
+        'region': 'Perth Basin',
+        'capacity_source': 'GSOO 2024'
     },
     'Waitsia/Xyris': {
         'operator': 'Mitsui/Beach',
@@ -280,7 +270,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'ramping',
         'gbb_facility_code': 'WAIT_GP',
         'typical_output': 45,
-        'region': 'Perth Basin'
+        'region': 'Perth Basin',
+        'capacity_source': 'GSOO 2024'
     },
     'Walyering': {
         'operator': 'Strike/Talon',
@@ -289,7 +280,8 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'operating',
         'gbb_facility_code': 'WALY_GP',
         'typical_output': 28,
-        'region': 'Perth Basin'
+        'region': 'Perth Basin',
+        'capacity_source': 'GSOO 2024'
     },
     'Scarborough': {
         'operator': 'Woodside',
@@ -298,16 +290,17 @@ WA_PRODUCTION_FACILITIES = {
         'status': 'future',
         'gbb_facility_code': 'SCAR_GP',
         'typical_output': 0,
-        'region': 'North West Shelf'
+        'region': 'North West Shelf',
+        'capacity_source': 'GSOO 2024'
     }
 }
 
 # ==============================================================================
-# ENHANCED API DATA FETCHING WITH ROBUST FALLBACKS
+# ENHANCED API DATA FETCHING WITH COMPREHENSIVE FALLBACKS
 # ==============================================================================
 
 def make_enhanced_api_request(url, params=None, timeout=30, retries=3):
-    """Enhanced API request with retries and better error handling"""
+    """Enhanced API request with retries and comprehensive error handling"""
     headers = {
         'User-Agent': 'WA-Gas-Dashboard/2.0 (Professional Analytics)',
         'Accept': 'application/json, text/csv, application/xml',
@@ -339,11 +332,12 @@ def make_enhanced_api_request(url, params=None, timeout=30, retries=3):
     return None, last_error, None
 
 def check_data_source_availability():
-    """Check availability of various data sources"""
+    """Comprehensive check of all data source availability"""
     sources = {
-        'AEMO_GBB_API': 'https://gbb.aemo.com.au/api/status',
+        'AEMO_GBB_API': 'https://gbb.aemo.com.au/api/v1/receipts',
+        'Medium_Term_Capacity': 'https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current',
         'AEMO_Public_Dashboard': 'https://aemo.com.au/en/energy-systems/gas/wa-gas-market',
-        'WA_Gov_Data': 'https://data.wa.gov.au/dataset/gas-production',
+        'WA_Gov_Data': 'https://data.wa.gov.au/',
         'GSOO_Reports': 'https://aemo.com.au/en/energy-systems/gas/wa-gas-market/wa-gas-statement-of-opportunities-wa-gsoo'
     }
     
@@ -351,15 +345,227 @@ def check_data_source_availability():
     for source, url in sources.items():
         try:
             response = requests.head(url, timeout=10)
-            availability[source] = response.status_code == 200
+            availability[source] = response.status_code in [200, 302, 403]  # 403 might indicate auth required but available
         except:
             availability[source] = False
     
     return availability
 
-@st.cache_data(ttl=1800)  # 30-minute cache
+# ==============================================================================
+# MEDIUM TERM CAPACITY API INTEGRATION
+# ==============================================================================
+
+@st.cache_data(ttl=3600)  # 1-hour cache for capacity data
+def fetch_medium_term_capacity_data():
+    """Fetch real medium-term capacity data from AEMO API"""
+    
+    # Potential Medium Term Capacity API endpoints
+    capacity_endpoints = [
+        "https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current",
+        "https://aemo.com.au/api/v1/report/mediumTermCapacity/current",
+        "https://data.aemo.com.au/api/v1/report/mediumTermCapacity/current"
+    ]
+    
+    for endpoint in capacity_endpoints:
+        try:
+            with st.spinner("🔄 Fetching real capacity data from Medium Term Capacity API..."):
+                data, error, content_type = make_enhanced_api_request(endpoint)
+            
+            if data and not error:
+                if content_type == 'json':
+                    return process_medium_term_capacity_json(data), None
+                elif content_type == 'csv':
+                    return process_medium_term_capacity_csv(data), None
+                    
+        except Exception as e:
+            st.warning(f"⚠️ Medium Term Capacity API failed: {e}")
+            continue
+    
+    # Fallback to GSOO 2024 static values
+    st.info("📊 Using GSOO 2024 static capacity values (Medium Term Capacity API unavailable)")
+    return create_fallback_capacity_data(), "API unavailable"
+
+def process_medium_term_capacity_json(api_data):
+    """Process JSON response from Medium Term Capacity API"""
+    
+    if 'rows' not in api_data:
+        raise ValueError("Invalid API response - missing 'rows' data")
+    
+    capacity_records = []
+    
+    for row in api_data['rows']:
+        facility_code = row.get('facilityCode', '')
+        facility_name = row.get('facilityName', '')
+        capacity = row.get('capacity', 0)
+        capacity_type = row.get('capacityType', '')
+        description = row.get('description', '')
+        
+        # Filter for production/nameplate capacity of WA facilities
+        if capacity_type in ['PRODUCTION', 'NAMEPLATE', 'MDQ'] and capacity > 0:
+            
+            dashboard_facility = map_facility_code_to_dashboard_name(facility_code, facility_name)
+            
+            if dashboard_facility:
+                capacity_records.append({
+                    'dashboard_facility': dashboard_facility,
+                    'facility_code': facility_code,
+                    'facility_name': facility_name,
+                    'capacity_tj_day': capacity,
+                    'capacity_type': capacity_type,
+                    'description': description,
+                    'effective_date': row.get('startGasDay', ''),
+                    'end_date': row.get('endGasDay', ''),
+                    'report_id': api_data.get('reportId', ''),
+                    'as_at': api_data.get('asAt', '')
+                })
+    
+    capacity_df = pd.DataFrame(capacity_records)
+    
+    if capacity_df.empty:
+        raise ValueError("No WA facility capacity data found in API response")
+    
+    # Get latest capacity for each facility
+    latest_capacity = capacity_df.groupby('dashboard_facility').agg({
+        'capacity_tj_day': 'last',
+        'capacity_type': 'last',
+        'description': 'last',
+        'effective_date': 'last'
+    }).reset_index()
+    
+    st.success(f"✅ Successfully loaded capacity data for {len(latest_capacity)} WA facilities")
+    
+    return latest_capacity
+
+def map_facility_code_to_dashboard_name(facility_code, facility_name):
+    """Map API facility codes to dashboard facility names"""
+    
+    facility_mapping = {
+        'KARR_GP': 'Karratha Gas Plant (NWS)',
+        'GORG_GP': 'Gorgon', 
+        'WHET_GP': 'Wheatstone',
+        'PLUT_GP': 'Pluto',
+        'VARN_GP': 'Varanus Island',
+        'MCED_GP': 'Macedon',
+        'DVCR_GP': 'Devil Creek',
+        'BEHA_GP': 'Beharra Springs',
+        'WAIT_GP': 'Waitsia/Xyris',
+        'WALY_GP': 'Walyering',
+        'SCAR_GP': 'Scarborough',
+        # Alternative codes
+        'NWS_KGP': 'Karratha Gas Plant (NWS)',
+        'GORGON': 'Gorgon',
+        'WHEATSTONE': 'Wheatstone',
+        'VARANUS': 'Varanus Island',
+        'MACEDON': 'Macedon'
+    }
+    
+    # Direct mapping
+    if facility_code in facility_mapping:
+        return facility_mapping[facility_code]
+    
+    # Fuzzy matching on facility name
+    facility_name_lower = facility_name.lower()
+    
+    name_keywords = {
+        'karratha': 'Karratha Gas Plant (NWS)',
+        'north west shelf': 'Karratha Gas Plant (NWS)',
+        'nws': 'Karratha Gas Plant (NWS)',
+        'gorgon': 'Gorgon',
+        'wheatstone': 'Wheatstone',
+        'pluto': 'Pluto',
+        'varanus': 'Varanus Island',
+        'macedon': 'Macedon',
+        'devil creek': 'Devil Creek',
+        'beharra': 'Beharra Springs',
+        'waitsia': 'Waitsia/Xyris',
+        'xyris': 'Waitsia/Xyris',
+        'walyering': 'Walyering',
+        'scarborough': 'Scarborough'
+    }
+    
+    for keyword, dashboard_name in name_keywords.items():
+        if keyword in facility_name_lower:
+            return dashboard_name
+    
+    return None  # Will be filtered out
+
+def create_fallback_capacity_data():
+    """Create fallback capacity data when API unavailable"""
+    
+    capacity_data = []
+    for facility, config in WA_PRODUCTION_FACILITIES.items():
+        capacity_data.append({
+            'dashboard_facility': facility,
+            'facility_code': config.get('gbb_facility_code', ''),
+            'facility_name': facility,
+            'capacity_tj_day': config['max_domestic_capacity'],
+            'capacity_type': 'NAMEPLATE',
+            'description': 'GSOO 2024 Baseline',
+            'effective_date': '2024-01-01'
+        })
+    
+    return pd.DataFrame(capacity_data)
+
+def update_facility_capacities_with_api_data(capacity_df):
+    """Update WA_PRODUCTION_FACILITIES with real API capacity data"""
+    
+    updated_facilities = WA_PRODUCTION_FACILITIES.copy()
+    
+    for _, row in capacity_df.iterrows():
+        facility_name = row['dashboard_facility']
+        real_capacity = row['capacity_tj_day']
+        capacity_type = row['capacity_type']
+        
+        if facility_name in updated_facilities:
+            updated_facilities[facility_name]['max_domestic_capacity'] = real_capacity
+            updated_facilities[facility_name]['api_capacity_type'] = capacity_type
+            updated_facilities[facility_name]['capacity_source'] = 'Medium Term Capacity API'
+            updated_facilities[facility_name]['last_updated'] = datetime.now()
+            
+            st.success(f"✅ Updated {facility_name}: {real_capacity} TJ/day ({capacity_type})")
+    
+    return updated_facilities
+
+# ==============================================================================
+# PRODUCTION DATA FETCHING WITH ENHANCED FALLBACKS
+# ==============================================================================
+
+@st.cache_data(ttl=1800)
+def fetch_real_production_facility_data_with_capacity_api():
+    """Enhanced production data with real Medium Term Capacity constraints"""
+    
+    # First, get real capacity data
+    capacity_df, capacity_error = fetch_medium_term_capacity_data()
+    
+    # Update facility configurations with real capacity data
+    if capacity_df is not None and not capacity_df.empty:
+        global WA_PRODUCTION_FACILITIES
+        WA_PRODUCTION_FACILITIES = update_facility_capacities_with_api_data(capacity_df)
+        st.info(f"📊 Applied real capacity constraints to {len(capacity_df)} facilities")
+    
+    # Now fetch production data using enhanced capacity constraints
+    production_df, prod_error = fetch_real_production_facility_data_enhanced()
+    
+    if production_df is not None and not production_df.empty:
+        # Apply real capacity constraints to production data
+        for facility in production_df.columns:
+            if facility in WA_PRODUCTION_FACILITIES and facility not in ['Date', 'Total_Supply']:
+                real_capacity = WA_PRODUCTION_FACILITIES[facility]['max_domestic_capacity']
+                production_df[facility] = np.minimum(production_df[facility], real_capacity)
+        
+        # Recalculate total supply with real constraints
+        facility_columns = [col for col in production_df.columns if col not in ['Date', 'Total_Supply']]
+        production_df['Total_Supply'] = production_df[facility_columns].sum(axis=1)
+        
+        # Add metadata
+        production_df.attrs['capacity_source'] = 'Medium Term Capacity API' if capacity_error is None else 'GSOO 2024'
+        production_df.attrs['capacity_updated'] = datetime.now()
+    
+    return production_df, prod_error
+
+@st.cache_data(ttl=1800)
 def fetch_real_production_facility_data_enhanced():
-    """Enhanced production data fetching with multiple data source fallbacks"""
+    """Enhanced production data fetching with multiple fallbacks"""
     
     end_date = datetime.now()
     start_date = end_date - timedelta(days=90)
@@ -369,33 +575,21 @@ def fetch_real_production_facility_data_enhanced():
         {
             'name': 'AEMO GBB API',
             'function': lambda: fetch_aemo_gbb_production(start_date, end_date),
-            'priority': 1,
-            'description': 'Real-time facility production data'
+            'priority': 1
         },
         {
             'name': 'AEMO Public Dashboard',
             'function': lambda: fetch_aemo_public_production(start_date, end_date),
-            'priority': 2,
-            'description': 'Public dashboard CSV exports'
-        },
-        {
-            'name': 'WA Government Data Portal',
-            'function': lambda: fetch_wa_gov_production(start_date, end_date),
-            'priority': 3,
-            'description': 'State government gas statistics'
+            'priority': 2
         },
         {
             'name': 'GSOO 2024 Baseline',
             'function': lambda: create_gsoo_production_baseline(start_date, end_date),
-            'priority': 4,
-            'description': 'Statement of Opportunities baseline data'
+            'priority': 3
         }
     ]
     
-    # Check source availability
-    availability = check_data_source_availability()
-    
-    # Try each data source in order
+    # Try each data source
     for source in data_sources:
         try:
             with st.spinner(f"🔄 Fetching production data from {source['name']}..."):
@@ -404,7 +598,6 @@ def fetch_real_production_facility_data_enhanced():
             if data is not None and not data.empty:
                 st.success(f"✅ Successfully loaded production data from {source['name']}")
                 
-                # Add data quality metadata
                 data.attrs['source'] = source['name']
                 data.attrs['quality'] = 'real' if source['priority'] <= 2 else 'estimate'
                 data.attrs['last_updated'] = datetime.now()
@@ -415,17 +608,14 @@ def fetch_real_production_facility_data_enhanced():
             st.warning(f"⚠️ {source['name']} failed: {str(e)[:100]}...")
             continue
     
-    # If all sources fail
     st.error("❌ All production data sources unavailable")
     return None, "All data sources failed"
 
 def fetch_aemo_gbb_production(start_date, end_date):
-    """Attempt to fetch from AEMO GBB API (may require authentication)"""
+    """Attempt to fetch from AEMO GBB API"""
     
-    # Multiple potential AEMO endpoints
     endpoints = [
         "https://gbb.aemo.com.au/api/v1/receipts",
-        "https://nemweb.com.au/Reports/Current/Gas/",
         "https://aemo.com.au/aemo/data/wa/gbb/receipts"
     ]
     
@@ -439,14 +629,8 @@ def fetch_aemo_gbb_production(start_date, end_date):
         data, error, content_type = make_enhanced_api_request(endpoint, params)
         
         if data and not error:
-            if content_type == 'json':
-                # Process JSON response
-                receipts_df = pd.DataFrame(data.get('data', []))
-                if not receipts_df.empty:
-                    return process_gbb_receipts_data(receipts_df), None
-            elif content_type == 'csv':
-                # Process CSV response
-                receipts_df = pd.read_csv(StringIO(data))
+            if content_type == 'json' and 'data' in data:
+                receipts_df = pd.DataFrame(data['data'])
                 if not receipts_df.empty:
                     return process_gbb_receipts_data(receipts_df), None
     
@@ -455,11 +639,9 @@ def fetch_aemo_gbb_production(start_date, end_date):
 def fetch_aemo_public_production(start_date, end_date):
     """Fetch from AEMO's public data dashboard"""
     
-    # AEMO public data URLs (these may change)
     public_urls = [
         "https://aemo.com.au/-/media/files/gas/gbb/wa-production-facilities.csv",
-        "https://www.aemo.com.au/aemo/data/wa/gbb/production.csv",
-        "https://data.aemo.com.au/gas/wa/production/current.csv"
+        "https://www.aemo.com.au/aemo/data/wa/gbb/production.csv"
     ]
     
     for url in public_urls:
@@ -468,46 +650,12 @@ def fetch_aemo_public_production(start_date, end_date):
         if data and content_type == 'csv':
             try:
                 df = pd.read_csv(StringIO(data))
-                
-                # Filter by date range if date column exists
-                if 'gas_date' in df.columns:
-                    df['gas_date'] = pd.to_datetime(df['gas_date'])
-                    df = df[(df['gas_date'] >= start_date) & (df['gas_date'] <= end_date)]
-                
                 if not df.empty:
                     return process_public_production_data(df), None
-                    
-            except Exception as e:
+            except:
                 continue
     
     return None, "AEMO public data not available"
-
-def fetch_wa_gov_production(start_date, end_date):
-    """Fetch from WA Government data portal"""
-    
-    wa_gov_urls = [
-        "https://data.wa.gov.au/api/3/action/datastore_search?resource_id=gas-production",
-        "https://www.wa.gov.au/system/files/2024-07/gas-production-statistics.csv"
-    ]
-    
-    for url in wa_gov_urls:
-        data, error, content_type = make_enhanced_api_request(url)
-        
-        if data:
-            try:
-                if content_type == 'json':
-                    records = data.get('result', {}).get('records', [])
-                    if records:
-                        df = pd.DataFrame(records)
-                        return process_wa_gov_data(df), None
-                elif content_type == 'csv':
-                    df = pd.read_csv(StringIO(data))
-                    return process_wa_gov_data(df), None
-                    
-            except Exception as e:
-                continue
-    
-    return None, "WA Government data not available"
 
 def create_gsoo_production_baseline(start_date, end_date):
     """Create production baseline using GSOO 2024 data"""
@@ -515,8 +663,8 @@ def create_gsoo_production_baseline(start_date, end_date):
     st.info("📊 Using WA Gas Statement of Opportunities 2024 baseline data")
     
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
+    np.random.seed(42)  # For reproducible results
     
-    # GSOO 2024 production baseline (TJ/day typical outputs)
     production_data = {'Date': dates}
     
     for facility, config in WA_PRODUCTION_FACILITIES.items():
@@ -525,19 +673,16 @@ def create_gsoo_production_baseline(start_date, end_date):
         max_capacity = config['max_domestic_capacity']
         
         if status == 'operating':
-            # Operating facilities: 85-95% of typical output with realistic variation
             base_util = np.random.uniform(0.85, 0.95, len(dates))
-            seasonal_factor = 1 + 0.1 * np.cos(2 * np.pi * (dates.dayofyear - 200) / 365)  # Winter peak
+            seasonal_factor = 1 + 0.1 * np.cos(2 * np.pi * (dates.dayofyear - 200) / 365)
             production = typical_output * base_util * seasonal_factor
             
         elif status == 'ramping':
-            # Ramping facilities: gradual increase
             ramp_progress = np.linspace(0.6, 0.9, len(dates))
             noise = np.random.normal(0, 0.05, len(dates))
             production = typical_output * (ramp_progress + noise)
             
         elif status == 'declining':
-            # Declining facilities: gradual decrease
             decline_progress = np.linspace(0.8, 0.4, len(dates))
             noise = np.random.normal(0, 0.03, len(dates))
             production = typical_output * (decline_progress + noise)
@@ -545,42 +690,31 @@ def create_gsoo_production_baseline(start_date, end_date):
         else:  # future
             production = np.zeros(len(dates))
         
-        # Ensure realistic bounds
         production = np.clip(production, 0, max_capacity)
         production_data[facility] = production
     
     df = pd.DataFrame(production_data)
     df['Total_Supply'] = df[[col for col in df.columns if col != 'Date']].sum(axis=1)
     
-    # Add metadata
-    df.attrs['source'] = 'GSOO 2024 Baseline'
-    df.attrs['quality'] = 'estimate'
-    df.attrs['last_updated'] = datetime.now()
-    
     return df, None
 
 def process_gbb_receipts_data(receipts_df):
     """Process AEMO GBB receipts data into dashboard format"""
     
-    # Standard GBB column mapping
     column_mapping = {
         'gas_date': 'Date',
         'gasDate': 'Date', 
         'facility_code': 'facility_code',
         'facilityCode': 'facility_code',
         'quantity_tj': 'quantity',
-        'quantityTJ': 'quantity',
-        'receipt_point': 'facility_code'
+        'quantityTJ': 'quantity'
     }
     
-    # Normalize column names
     receipts_df = receipts_df.rename(columns=column_mapping)
     
-    # Ensure required columns exist
     if 'Date' not in receipts_df.columns or 'facility_code' not in receipts_df.columns:
         raise ValueError("Required columns missing from GBB data")
     
-    # Process data
     receipts_df['Date'] = pd.to_datetime(receipts_df['Date'])
     receipts_df['quantity'] = pd.to_numeric(receipts_df['quantity'], errors='coerce')
     
@@ -600,7 +734,6 @@ def process_gbb_receipts_data(receipts_df):
         if facility not in production_pivot.columns:
             production_pivot[facility] = 0
     
-    # Calculate total
     facility_columns = [col for col in production_pivot.columns if col != 'Date']
     production_pivot['Total_Supply'] = production_pivot[facility_columns].sum(axis=1)
     
@@ -608,19 +741,11 @@ def process_gbb_receipts_data(receipts_df):
 
 def process_public_production_data(df):
     """Process AEMO public dashboard data"""
-    
-    # This would depend on the actual format of AEMO's public data
-    # Implementation would be similar to GBB processing but adapted to public format
-    
-    return process_gbb_receipts_data(df)  # Placeholder
+    return process_gbb_receipts_data(df)
 
-def process_wa_gov_data(df):
-    """Process WA Government data portal information"""
-    
-    # WA Gov data processing (format-dependent)
-    # Would need to be adapted based on actual WA Gov data structure
-    
-    return process_gbb_receipts_data(df)  # Placeholder
+# ==============================================================================
+# DEMAND DATA FETCHING
+# ==============================================================================
 
 @st.cache_data(ttl=1800)
 def fetch_real_market_demand_data_enhanced():
@@ -629,7 +754,6 @@ def fetch_real_market_demand_data_enhanced():
     end_date = datetime.now()
     start_date = end_date - timedelta(days=90)
     
-    # Try AEMO deliveries API first
     try:
         with st.spinner("🔄 Fetching demand data from AEMO GBB..."):
             demand_df, error = fetch_aemo_demand_data(start_date, end_date)
@@ -643,7 +767,6 @@ def fetch_real_market_demand_data_enhanced():
     except Exception as e:
         st.warning(f"⚠️ AEMO demand API failed: {e}")
     
-    # Fallback to GSOO demand patterns
     st.info("📊 Using GSOO 2024 demand patterns")
     return create_gsoo_demand_baseline(start_date, end_date), None
 
@@ -664,26 +787,23 @@ def fetch_aemo_demand_data(start_date, end_date):
     for endpoint in endpoints:
         data, error, content_type = make_enhanced_api_request(endpoint, params)
         
-        if data and not error:
-            if content_type == 'json' and 'data' in data:
-                deliveries_df = pd.DataFrame(data['data'])
+        if data and not error and content_type == 'json' and 'data' in data:
+            deliveries_df = pd.DataFrame(data['data'])
+            
+            if not deliveries_df.empty:
+                deliveries_df['gas_date'] = pd.to_datetime(deliveries_df['gas_date'])
+                deliveries_df['quantity_tj'] = pd.to_numeric(deliveries_df['quantity_tj'], errors='coerce')
                 
-                if not deliveries_df.empty:
-                    # Process deliveries data
-                    deliveries_df['gas_date'] = pd.to_datetime(deliveries_df['gas_date'])
-                    deliveries_df['quantity_tj'] = pd.to_numeric(deliveries_df['quantity_tj'], errors='coerce')
-                    
-                    # Aggregate total market demand by date
-                    daily_demand = deliveries_df.groupby('gas_date')['quantity_tj'].sum().reset_index()
-                    daily_demand.rename(columns={'gas_date': 'Date', 'quantity_tj': 'Market_Demand'}, inplace=True)
-                    
-                    # Ensure complete date range
-                    date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-                    complete_dates = pd.DataFrame({'Date': date_range})
-                    demand_complete = complete_dates.merge(daily_demand, on='Date', how='left')
-                    demand_complete['Market_Demand'] = demand_complete['Market_Demand'].interpolate().fillna(1400)
-                    
-                    return demand_complete, None
+                daily_demand = deliveries_df.groupby('gas_date')['quantity_tj'].sum().reset_index()
+                daily_demand.rename(columns={'gas_date': 'Date', 'quantity_tj': 'Market_Demand'}, inplace=True)
+                
+                # Ensure complete date range
+                date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+                complete_dates = pd.DataFrame({'Date': date_range})
+                demand_complete = complete_dates.merge(daily_demand, on='Date', how='left')
+                demand_complete['Market_Demand'] = demand_complete['Market_Demand'].interpolate().fillna(1400)
+                
+                return demand_complete, None
     
     return None, "AEMO demand API not accessible"
 
@@ -691,8 +811,8 @@ def create_gsoo_demand_baseline(start_date, end_date):
     """Create demand baseline using GSOO 2024 forecasts"""
     
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
+    np.random.seed(43)
     
-    # GSOO 2024 WA demand sectors (TJ/day)
     gsoo_demand_components = {
         'residential': 280,
         'commercial': 180,
@@ -701,23 +821,18 @@ def create_gsoo_demand_baseline(start_date, end_date):
         'mining': 140
     }
     
-    base_demand = sum(gsoo_demand_components.values())  # ~1,400 TJ/day
+    base_demand = sum(gsoo_demand_components.values())
     
     demand_data = []
     for date in dates:
         day_of_year = date.timetuple().tm_yday
         
-        # Seasonal pattern (WA winter peak)
         seasonal_factor = 1 + 0.25 * np.cos(2 * np.pi * (day_of_year - 200) / 365)
-        
-        # Weekly pattern
         weekly_factor = 0.85 if date.weekday() >= 5 else 1.0
-        
-        # Random daily variation
         daily_variation = np.random.normal(0, 0.05)
         
         daily_demand = base_demand * seasonal_factor * weekly_factor * (1 + daily_variation)
-        demand_data.append(max(daily_demand, 800))  # Minimum threshold
+        demand_data.append(max(daily_demand, 800))
     
     df = pd.DataFrame({
         'Date': dates,
@@ -729,12 +844,15 @@ def create_gsoo_demand_baseline(start_date, end_date):
     
     return df
 
+# ==============================================================================
+# NEWS FEED WITH ENHANCED RSS INTEGRATION
+# ==============================================================================
+
 @st.cache_data(ttl=1800)
 def fetch_real_news_feed_enhanced():
-    """Enhanced news feed with graceful fallback when feedparser unavailable"""
+    """Enhanced news feed with real RSS sources and fallback"""
     
     if not FEEDPARSER_AVAILABLE:
-        # Fallback to curated news when feedparser is not available
         st.info("📰 Using curated news feed (feedparser not installed)")
         return get_fallback_news_feed()
     
@@ -763,19 +881,17 @@ def fetch_real_news_feed_enhanced():
             with st.spinner(f"🔄 Fetching news from {source['name']}..."):
                 feed = feedparser.parse(source['rss_url'])
                 
-                for entry in feed.entries[:3]:  # Top 3 from each source
-                    # Simple sentiment analysis based on keywords
+                for entry in feed.entries[:3]:
                     title_lower = entry.title.lower()
                     summary_lower = getattr(entry, 'summary', '').lower()
                     content = f"{title_lower} {summary_lower}"
                     
-                    sentiment = 'N'  # Default neutral
+                    sentiment = 'N'
                     if any(word in content for word in ['increase', 'growth', 'expansion', 'record', 'strong']):
                         sentiment = '+'
                     elif any(word in content for word in ['decrease', 'decline', 'shortage', 'concern', 'issue']):
                         sentiment = '-'
                     
-                    # Filter for gas/energy relevance
                     if any(word in content for word in ['gas', 'energy', 'lng', 'pipeline', 'aemo', 'power']):
                         all_news.append({
                             'headline': entry.title,
@@ -790,11 +906,10 @@ def fetch_real_news_feed_enhanced():
             st.warning(f"⚠️ Failed to fetch news from {source['name']}: {str(e)[:50]}...")
             continue
     
-    # If no real news fetched, use fallback
     if not all_news:
         return get_fallback_news_feed()
     
-    return all_news[:10]  # Return top 10 news items
+    return all_news[:10]
 
 def get_fallback_news_feed():
     """Fallback news feed when RSS parsing is unavailable"""
@@ -830,26 +945,15 @@ def get_fallback_news_feed():
             'url': 'https://www.chevron.com/operations/gorgon',
             'timestamp': '12 hours ago',
             'summary': 'Gorgon domestic gas plant operating at near-maximum capacity to meet WA demand'
-        },
-        {
-            'headline': 'DBNGP pipeline maintenance scheduled for August 2025',
-            'sentiment': 'N',
-            'source': 'AEMO',
-            'url': 'https://aemo.com.au/en/newsroom/market-notices',
-            'timestamp': '1 day ago',
-            'summary': 'Planned 5-day maintenance window may impact gas flows between Perth and regional areas'
         }
     ]
-
-    
-    return all_news[:10]  # Return top 10 news items
 
 # ==============================================================================
 # ENHANCED VISUALIZATION FUNCTIONS
 # ==============================================================================
 
 def create_enhanced_facility_supply_demand_chart(production_df, demand_df, selected_facilities=None):
-    """Enhanced chart with real data indicators and improved styling"""
+    """Enhanced chart with real data indicators and comprehensive styling"""
     
     if production_df is None or demand_df is None:
         st.error("❌ Unable to create chart: Missing data")
@@ -862,6 +966,7 @@ def create_enhanced_facility_supply_demand_chart(production_df, demand_df, selec
     # Get data quality info
     prod_source = getattr(production_df, 'attrs', {}).get('source', 'Unknown')
     prod_quality = getattr(production_df, 'attrs', {}).get('quality', 'unknown')
+    capacity_source = getattr(production_df, 'attrs', {}).get('capacity_source', 'GSOO 2024')
     
     # Normalize dates
     production_df_clean = production_df.copy()
@@ -879,9 +984,8 @@ def create_enhanced_facility_supply_demand_chart(production_df, demand_df, selec
         
         chart_data['Date'] = pd.to_datetime(chart_data['Date'])
         
-        # Data quality indicator
         quality_class = f"quality-{prod_quality}"
-        st.markdown(f'<div class="data-quality {quality_class}">📊 Data Source: {prod_source}</div>', 
+        st.markdown(f'<div class="data-quality {quality_class}">📊 Production: {prod_source} | Capacity: {capacity_source}</div>', 
                    unsafe_allow_html=True)
         
     except Exception as e:
@@ -914,6 +1018,7 @@ def create_enhanced_facility_supply_demand_chart(production_df, demand_df, selec
         color = config.get('color', f'rgba({(i*60)%255}, {(i*80)%255}, {(i*100+100)%255}, 0.7)')
         max_capacity = config.get('max_domestic_capacity', 100)
         operator = config.get('operator', 'Unknown')
+        capacity_source_facility = config.get('capacity_source', 'GSOO 2024')
         
         # Production values (capped at medium-term capacity)
         production_values = np.minimum(chart_data[facility].fillna(0), max_capacity)
@@ -932,7 +1037,8 @@ def create_enhanced_facility_supply_demand_chart(production_df, demand_df, selec
                          'Date: %{x|%Y-%m-%d}<br>' +
                          'Production: %{y:.1f} TJ/day<br>' +
                          f'Max Capacity: {max_capacity} TJ/day<br>' +
-                         f'Source: {prod_source}<extra></extra>'
+                         f'Capacity Source: {capacity_source_facility}<br>' +
+                         f'Production Source: {prod_source}<extra></extra>'
         ))
     
     # Add market demand overlay
@@ -972,20 +1078,6 @@ def create_enhanced_facility_supply_demand_chart(production_df, demand_df, selec
                          'Date: %{x|%Y-%m-%d}<br>' +
                          'Demand exceeds capacity<extra></extra>'
         ))
-        
-        # Add deficit annotations
-        for idx, (date, demand) in enumerate(zip(deficit_dates.head(3), deficit_demands.head(3))):
-            fig.add_annotation(
-                x=date,
-                y=demand,
-                text="⚠️ Capacity Shortfall",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor='red',
-                bgcolor='rgba(255,255,255,0.9)',
-                bordercolor='red',
-                borderwidth=1
-            )
     
     # Enhanced layout
     data_quality_icon = "📡" if prod_quality == 'real' else "📊"
@@ -1027,7 +1119,7 @@ def create_enhanced_facility_supply_demand_chart(production_df, demand_df, selec
         margin=dict(l=60, r=250, t=80, b=60),
         annotations=[
             dict(
-                text=f"Data: {prod_source}",
+                text=f"📊 Data: {prod_source} | 🏭 Capacity: {capacity_source}",
                 xref="paper", yref="paper",
                 x=0.02, y=0.98,
                 showarrow=False,
@@ -1058,7 +1150,7 @@ def display_enhanced_command_center():
         live_sources = sum(availability.values())
         total_sources = len(availability)
         
-        if live_sources >= 2:
+        if live_sources >= 3:
             st.markdown('<span class="api-status api-live">📡 LIVE DATA ACTIVE</span>', unsafe_allow_html=True)
         elif live_sources >= 1:
             st.markdown('<span class="api-status api-cached">⚡ PARTIAL DATA</span>', unsafe_allow_html=True)
@@ -1075,21 +1167,24 @@ def display_enhanced_command_center():
             st.rerun()
     
     # Data source status dashboard
-    with st.expander("📊 Data Source Status", expanded=False):
+    with st.expander("📊 Comprehensive Data Source Status", expanded=False):
         status_cols = st.columns(len(availability))
         for i, (source, status) in enumerate(availability.items()):
             with status_cols[i]:
                 status_icon = "✅" if status else "❌"
-                st.markdown(f"**{status_icon} {source.replace('_', ' ')}**")
+                status_class = "api-live" if status else "api-error"
+                st.markdown(f'<span class="api-status {status_class}">{status_icon} {source.replace("_", " ")}</span>', 
+                           unsafe_allow_html=True)
     
     # Fetch all data with enhanced error handling
-    with st.spinner("🔄 Loading comprehensive market data..."):
-        production_df, prod_error = fetch_real_production_facility_data_enhanced()
+    with st.spinner("🔄 Loading comprehensive market data from multiple sources..."):
+        production_df, prod_error = fetch_real_production_facility_data_with_capacity_api()
         demand_df, demand_error = fetch_real_market_demand_data_enhanced()
+        capacity_df, capacity_error = fetch_medium_term_capacity_data()
         news_items = fetch_real_news_feed_enhanced()
     
-    # API Status Summary
-    status_col1, status_col2, status_col3 = st.columns(3)
+    # Enhanced API Status Summary
+    status_col1, status_col2, status_col3, status_col4 = st.columns(4)
     with status_col1:
         prod_status = "✅ Production Data" if prod_error is None else f"⚠️ Production: Fallback"
         st.markdown(f"**{prod_status}**")
@@ -1097,13 +1192,16 @@ def display_enhanced_command_center():
         demand_status = "✅ Demand Data" if demand_error is None else f"⚠️ Demand: Fallback"
         st.markdown(f"**{demand_status}**")
     with status_col3:
+        capacity_status = "✅ Capacity API" if capacity_error is None else f"⚠️ Capacity: Static"
+        st.markdown(f"**{capacity_status}**")
+    with status_col4:
         news_status = f"✅ News Feed ({len(news_items)} items)"
         st.markdown(f"**{news_status}**")
     
-    # Enhanced KPI Cards
+    # Enhanced KPI Cards with Real Data
     col1, col2, col3, col4 = st.columns(4)
     
-    # Calculate real market balance
+    # Calculate comprehensive market metrics
     if production_df is not None and demand_df is not None and not production_df.empty and not demand_df.empty:
         today_supply = production_df['Total_Supply'].iloc[-1]
         today_demand = demand_df['Market_Demand'].iloc[-1]
@@ -1112,14 +1210,23 @@ def display_enhanced_command_center():
         balance_status = "Surplus" if today_balance > 0 else "Deficit"
         balance_color = "#16a34a" if today_balance > 0 else "#dc2626"
         
-        # Supply adequacy ratio
         adequacy_ratio = today_supply / today_demand if today_demand > 0 else 1
+        
+        # Total system capacity
+        total_capacity = sum(config['max_domestic_capacity'] 
+                           for config in WA_PRODUCTION_FACILITIES.values()
+                           if config['status'] in ['operating', 'ramping'])
+        utilization = (today_supply / total_capacity * 100) if total_capacity > 0 else 0
         
     else:
         today_balance = 0
         balance_status = "Unknown"
         balance_color = "#64748b"
         adequacy_ratio = 1
+        today_supply = 0
+        today_demand = 0
+        total_capacity = 0
+        utilization = 0
     
     with col1:
         st.markdown(f"""
@@ -1134,36 +1241,26 @@ def display_enhanced_command_center():
         """, unsafe_allow_html=True)
     
     with col2:
-        # Production capacity utilization
-        if production_df is not None and not production_df.empty:
-            total_capacity = sum(config['max_domestic_capacity'] 
-                               for config in WA_PRODUCTION_FACILITIES.values()
-                               if config['status'] in ['operating', 'ramping'])
-            current_production = production_df['Total_Supply'].iloc[-1]
-            utilization = (current_production / total_capacity * 100) if total_capacity > 0 else 0
-            
-            util_color = "#dc2626" if utilization > 90 else "#ca8a04" if utilization > 75 else "#16a34a"
-        else:
-            utilization = 0
-            util_color = "#64748b"
+        util_color = "#dc2626" if utilization > 90 else "#ca8a04" if utilization > 75 else "#16a34a"
         
         st.markdown(f"""
         <div class="kpi-card">
             <p class="kpi-value" style="color: {util_color};">{utilization:.1f}%</p>
             <p class="kpi-label">System Utilization</p>
             <p class="kpi-delta" style="color: {util_color};">
-                Current: {current_production:.0f} TJ/day<br>
+                Current: {today_supply:.0f} TJ/day<br>
                 Capacity: {total_capacity:,} TJ/day
             </p>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
-        # Operating facilities status
         operating_facilities = sum(1 for config in WA_PRODUCTION_FACILITIES.values() 
                                  if config['status'] == 'operating')
         ramping_facilities = sum(1 for config in WA_PRODUCTION_FACILITIES.values() 
                                if config['status'] == 'ramping')
+        api_facilities = sum(1 for config in WA_PRODUCTION_FACILITIES.values() 
+                           if config.get('capacity_source') == 'Medium Term Capacity API')
         
         st.markdown(f"""
         <div class="kpi-card">
@@ -1171,7 +1268,7 @@ def display_enhanced_command_center():
             <p class="kpi-label">Operating Facilities</p>
             <p class="kpi-delta" style="color: #16a34a;">
                 Ramping: {ramping_facilities}<br>
-                ✅ All Systems Normal
+                API Updated: {api_facilities}
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -1179,18 +1276,20 @@ def display_enhanced_command_center():
     with col4:
         # Market alerts/notifications
         alert_count = 0
-        alert_type = "Normal"
-        alert_color = "#16a34a"
+        alerts = []
         
-        # Check for alerts
         if today_balance < -50:
             alert_count += 1
-            alert_type = "Supply Alert"
-            alert_color = "#dc2626"
-        elif utilization > 90:
+            alerts.append("Supply Deficit")
+        if utilization > 90:
             alert_count += 1
-            alert_type = "High Utilization"
-            alert_color = "#ca8a04"
+            alerts.append("High Utilization")
+        if capacity_error is not None:
+            alert_count += 1
+            alerts.append("Capacity API Down")
+        
+        alert_type = alerts[0] if alerts else "Normal"
+        alert_color = "#dc2626" if alert_count > 0 else "#16a34a"
         
         st.markdown(f"""
         <div class="kpi-card">
@@ -1209,8 +1308,9 @@ def display_enhanced_command_center():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Enhanced Supply & Demand Chart
+        # Enhanced Supply & Demand Chart with Real Data
         st.markdown("### 📊 WA Gas Supply by Production Facility vs Market Demand")
+        st.markdown("*Enhanced with Medium Term Capacity API constraints*")
         
         # Chart controls
         control_col1, control_col2, control_col3 = st.columns(3)
@@ -1219,9 +1319,9 @@ def display_enhanced_command_center():
         with control_col2:
             show_future = st.checkbox("Include Future Facilities", value=False)
         with control_col3:
-            show_capacity_lines = st.checkbox("Show Capacity Lines", value=False)
+            show_capacity_info = st.checkbox("Show Capacity Details", value=True)
         
-        # Enhanced facility selector
+        # Enhanced facility selector with comprehensive information
         if production_df is not None and not production_df.empty:
             actual_facilities = [col for col in production_df.columns if col not in ['Date', 'Total_Supply']]
             
@@ -1230,22 +1330,62 @@ def display_enhanced_command_center():
                 if WA_PRODUCTION_FACILITIES.get(f, {}).get('status') != 'future'
             ]
             
-            # Facility selection with status indicators
+            # Advanced facility selection interface
             st.markdown("**Select Production Facilities:**")
-            facility_cols = st.columns(3)
             
-            selected_facilities = []
-            for i, facility in enumerate(available_facilities):
-                config = WA_PRODUCTION_FACILITIES.get(facility, {})
-                status = config.get('status', 'unknown')
-                status_icon = {'operating': '🟢', 'ramping': '🟡', 'declining': '🟠', 'future': '⚪'}.get(status, '❓')
+            if show_capacity_info:
+                # Show facility details in expandable format
+                facility_selection = {}
                 
-                col_idx = i % 3
-                with facility_cols[col_idx]:
-                    if st.checkbox(f"{status_icon} {facility}", 
-                                 value=(status in ['operating', 'ramping'] and i < 8),
-                                 key=f"facility_{facility}"):
-                        selected_facilities.append(facility)
+                for region in ['North West Shelf', 'Perth Basin']:
+                    with st.expander(f"🏭 {region} Facilities", expanded=True):
+                        region_facilities = [f for f in available_facilities 
+                                           if WA_PRODUCTION_FACILITIES.get(f, {}).get('region') == region]
+                        
+                        region_cols = st.columns(2)
+                        for i, facility in enumerate(region_facilities):
+                            config = WA_PRODUCTION_FACILITIES.get(facility, {})
+                            status = config.get('status', 'unknown')
+                            capacity = config.get('max_domestic_capacity', 0)
+                            capacity_source = config.get('capacity_source', 'GSOO 2024')
+                            
+                            status_icons = {'operating': '🟢', 'ramping': '🟡', 'declining': '🟠', 'future': '⚪'}
+                            status_icon = status_icons.get(status, '❓')
+                            
+                            api_indicator = '📡' if capacity_source == 'Medium Term Capacity API' else '📊'
+                            
+                            col_idx = i % 2
+                            with region_cols[col_idx]:
+                                selected = st.checkbox(
+                                    f"{status_icon} {facility}",
+                                    value=(status in ['operating', 'ramping']),
+                                    help=f"{capacity} TJ/day • {config.get('operator', 'Unknown')} • {capacity_source}",
+                                    key=f"facility_{facility}"
+                                )
+                                facility_selection[facility] = selected
+                                
+                                if selected:
+                                    st.markdown(f"   {api_indicator} {capacity} TJ/day")
+            else:
+                # Simple checkbox selection
+                facility_cols = st.columns(3)
+                facility_selection = {}
+                
+                for i, facility in enumerate(available_facilities):
+                    config = WA_PRODUCTION_FACILITIES.get(facility, {})
+                    status = config.get('status', 'unknown')
+                    status_icon = {'operating': '🟢', 'ramping': '🟡', 'declining': '🟠', 'future': '⚪'}.get(status, '❓')
+                    
+                    col_idx = i % 3
+                    with facility_cols[col_idx]:
+                        selected = st.checkbox(
+                            f"{status_icon} {facility}",
+                            value=(status in ['operating', 'ramping'] and i < 8),
+                            key=f"simple_facility_{facility}"
+                        )
+                        facility_selection[facility] = selected
+            
+            selected_facilities = [f for f, selected in facility_selection.items() if selected]
             
             # Filter data based on period
             filtered_production_df = production_df.copy()
@@ -1267,9 +1407,9 @@ def display_enhanced_command_center():
                 )
                 st.plotly_chart(fig_enhanced, use_container_width=True)
                 
-                # Enhanced facility analysis
-                if st.button("📊 Generate Detailed Facility Analysis"):
-                    with st.expander("🔍 Comprehensive Facility Performance Analysis", expanded=True):
+                # Comprehensive facility analysis
+                if st.button("📊 Generate Comprehensive Facility Analysis", type="primary"):
+                    with st.expander("🔍 Detailed Facility Performance & Capacity Analysis", expanded=True):
                         
                         if not production_df.empty:
                             latest_data = production_df.iloc[-1]
@@ -1282,21 +1422,25 @@ def display_enhanced_command_center():
                                 max_capacity = config.get('max_domestic_capacity', 0)
                                 typical_output = config.get('typical_output', 0)
                                 
-                                # Calculate performance metrics
+                                # Performance metrics
                                 utilization = (current_production / max_capacity * 100) if max_capacity > 0 else 0
                                 vs_typical = (current_production / typical_output * 100) if typical_output > 0 else 0
                                 
-                                # 7-day and 30-day averages
+                                # Time-based averages
                                 recent_7d = production_df[facility].tail(7).mean()
                                 recent_30d = production_df[facility].tail(30).mean()
                                 
-                                # Performance trend
+                                # Trend analysis
                                 if recent_7d > recent_30d * 1.05:
                                     trend = "📈 Increasing"
                                 elif recent_7d < recent_30d * 0.95:
-                                    trend = "📉 Decreasing"
+                                    trend = "📉 Decreasing"  
                                 else:
                                     trend = "➡️ Stable"
+                                
+                                # Capacity source indicator
+                                capacity_source = config.get('capacity_source', 'GSOO 2024')
+                                capacity_indicator = '📡' if capacity_source == 'Medium Term Capacity API' else '📊'
                                 
                                 facility_analysis.append({
                                     'Facility': facility,
@@ -1306,49 +1450,80 @@ def display_enhanced_command_center():
                                     'Current Production (TJ/day)': f"{current_production:.1f}",
                                     '7-Day Average (TJ/day)': f"{recent_7d:.1f}",
                                     '30-Day Average (TJ/day)': f"{recent_30d:.1f}",
-                                    'Max Capacity (TJ/day)': f"{max_capacity}",
+                                    'Max Capacity (TJ/day)': f"{capacity_indicator} {max_capacity}",
                                     'Utilization (%)': f"{utilization:.1f}%",
                                     'vs Typical (%)': f"{vs_typical:.1f}%",
-                                    'Trend': trend
+                                    'Trend': trend,
+                                    'Capacity Source': capacity_source
                                 })
                             
                             analysis_df = pd.DataFrame(facility_analysis)
                             st.dataframe(analysis_df, use_container_width=True, hide_index=True)
                             
-                            # Summary statistics
+                            # Enhanced summary statistics
                             total_current = sum(latest_data.get(f, 0) for f in selected_facilities)
                             total_capacity = sum(WA_PRODUCTION_FACILITIES.get(f, {}).get('max_domestic_capacity', 0) for f in selected_facilities)
                             current_demand = demand_df['Market_Demand'].iloc[-1] if not demand_df.empty else 0
+                            api_updated_facilities = sum(1 for f in selected_facilities 
+                                                       if WA_PRODUCTION_FACILITIES.get(f, {}).get('capacity_source') == 'Medium Term Capacity API')
                             
-                            col_a, col_b, col_c = st.columns(3)
+                            col_a, col_b, col_c, col_d = st.columns(4)
                             with col_a:
                                 st.metric("Total Current Production", f"{total_current:.0f} TJ/day")
                             with col_b:
                                 st.metric("Total Selected Capacity", f"{total_capacity:,} TJ/day")
                             with col_c:
                                 st.metric("Spare Capacity", f"{total_capacity - total_current:.0f} TJ/day")
+                            with col_d:
+                                st.metric("API Updated Facilities", f"{api_updated_facilities}/{len(selected_facilities)}")
                             
-                            # Market context
+                            # Market context with enhanced insights
                             st.markdown(f"""
-                            **📊 Market Analysis Summary:**
+                            **📊 Comprehensive Market Analysis:**
                             - **Current Market Demand:** {current_demand:.1f} TJ/day
                             - **Selected Facilities Cover:** {(total_current / current_demand * 100) if current_demand > 0 else 0:.1f}% of demand
                             - **Overall System Utilization:** {(total_current / total_capacity * 100) if total_capacity > 0 else 0:.1f}%
                             - **Market Balance:** {'✅ Adequate Supply' if total_current >= current_demand else '⚠️ Tight Supply'}
+                            - **Capacity Data Quality:** {api_updated_facilities} facilities with real-time API capacity, {len(selected_facilities) - api_updated_facilities} with GSOO 2024 estimates
                             
-                            *Data Quality: {getattr(production_df, 'attrs', {}).get('source', 'Unknown')} | Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M AWST')}*
+                            **🔍 Data Provenance:**
+                            - *Production Data: {getattr(production_df, 'attrs', {}).get('source', 'Unknown')}*
+                            - *Capacity Data: {getattr(production_df, 'attrs', {}).get('capacity_source', 'GSOO 2024')}*
+                            - *Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M AWST')}*
                             """)
             else:
                 st.warning("⚠️ Please select at least one production facility to display the chart.")
+                
+                # Show available facilities summary when none selected
+                st.markdown("**Available Facilities:**")
+                summary_data = []
+                for facility in available_facilities:
+                    config = WA_PRODUCTION_FACILITIES.get(facility, {})
+                    summary_data.append({
+                        'Facility': facility,
+                        'Capacity (TJ/day)': config.get('max_domestic_capacity', 0),
+                        'Status': config.get('status', 'Unknown').title(),
+                        'Region': config.get('region', 'Unknown')
+                    })
+                
+                summary_df = pd.DataFrame(summary_data)
+                st.dataframe(summary_df, use_container_width=True, height=300)
+                
         else:
             st.error("❌ Production data unavailable. All data sources may be offline.")
+            
+            # Show system status when data unavailable
+            st.markdown("**System Status:**")
+            for source, status in check_data_source_availability().items():
+                status_icon = "✅" if status else "❌"
+                st.markdown(f"- {status_icon} {source.replace('_', ' ')}")
     
     with col2:
-        # Enhanced News Feed
+        # Enhanced News Feed with Real RSS Integration
         st.markdown("### 📰 Market Intelligence Feed")
         st.markdown("*Real-time market news and updates*")
         
-        # News filters
+        # Enhanced news filters
         filter_col1, filter_col2 = st.columns(2)
         with filter_col1:
             news_filter = st.selectbox("Sentiment:", ["All", "Positive", "Negative", "Neutral"])
@@ -1364,7 +1539,7 @@ def display_enhanced_command_center():
         if source_filter != "All":
             filtered_news = [item for item in filtered_news if item['source'] == source_filter]
         
-        # Display news items
+        # Display news items with enhanced formatting
         for item in filtered_news:
             sentiment_class_map = {'+': 'sentiment-positive', '-': 'sentiment-negative', 'N': 'sentiment-neutral'}
             sentiment_icon_map = {'+': '📈', '-': '📉', 'N': '📰'}
@@ -1388,168 +1563,151 @@ def display_enhanced_command_center():
         
         if not filtered_news:
             st.info("No news items match the selected filters.")
+        
+        # News feed status
+        if FEEDPARSER_AVAILABLE:
+            st.markdown('<span class="api-status api-live">📡 Live RSS Feeds</span>', unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="api-status api-fallback">📰 Curated News</span>', unsafe_allow_html=True)
 
 # ==============================================================================
-# MAIN APPLICATION
+# ENHANCED FACILITY CAPACITY ANALYSIS MODULE
+# ==============================================================================
+
+def display_enhanced_facility_capacity_analysis():
+    """Comprehensive facility capacity analysis with real API data"""
+    
+    st.markdown("### 🏭 WA Production Facilities - Comprehensive Capacity Analysis")
+    
+    # Fetch real capacity data
+    capacity_df, capacity_error = fetch_medium_term_capacity_data()
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        if capacity_df is not None and not capacity_df.empty:
+            st.markdown("#### 📊 Current Medium Term Capacity (Live API Data)")
+            
+            # Enhanced capacity display table
+            display_capacity_df = capacity_df.copy()
+            display_capacity_df['Capacity (TJ/day)'] = display_capacity_df['capacity_tj_day'].round(1)
+            display_capacity_df['Type'] = display_capacity_df['capacity_type']
+            display_capacity_df['Facility'] = display_capacity_df['dashboard_facility']
+            display_capacity_df['Status'] = display_capacity_df['description']
+            display_capacity_df['Effective Date'] = pd.to_datetime(display_capacity_df['effective_date']).dt.strftime('%Y-%m-%d')
+            
+            # Show enhanced table with sorting and filtering
+            st.dataframe(
+                display_capacity_df[['Facility', 'Capacity (TJ/day)', 'Type', 'Status', 'Effective Date']],
+                use_container_width=True,
+                height=400
+            )
+            
+            # Data source information with enhanced details
+            st.markdown(f"""
+            **📡 Data Source:** Medium Term Capacity Outlook API  
+            **Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M AWST')}  
+            **API Status:** {'✅ Connected' if capacity_error is None else '❌ Using Fallback'}  
+            **Facilities Mapped:** {len(capacity_df)} of {len(WA_PRODUCTION_FACILITIES)} dashboard facilities  
+            **Report ID:** {capacity_df.iloc[0].get('report_id', 'N/A') if not capacity_df.empty else 'N/A'}
+            """)
+            
+        else:
+            st.warning("⚠️ Medium Term Capacity API unavailable - using GSOO 2024 static values")
+            
+            # Show fallback capacity data with enhanced information
+            static_capacity_data = []
+            for facility, config in WA_PRODUCTION_FACILITIES.items():
+                static_capacity_data.append({
+                    'Facility': facility,
+                    'Capacity (TJ/day)': config['max_domestic_capacity'],
+                    'Source': config.get('capacity_source', 'GSOO 2024 Static'),
+                    'Status': config['status'].title(),
+                    'Operator': config.get('operator', 'Unknown'),
+                    'Region': config.get('region', 'Unknown')
+                })
+            
+            static_df = pd.DataFrame(static_capacity_data)
+            st.dataframe(static_df, use_container_width=True, height=400)
+    
+    with col2:
+        # Capacity summary metrics
+        st.markdown("#### 📈 Capacity Summary")
+        
+        if capacity_df is not None and not capacity_df.empty:
+            total_capacity = display_capacity_df['capacity_tj_day'].sum()
+            avg_capacity = display_capacity_df['capacity_tj_day'].mean()
+            production_facilities = len(display_capacity_df[display_capacity_df['capacity_type'] == 'PRODUCTION'])
+            nameplate_facilities = len(display_capacity_df[display_capacity_df['capacity_type'] == 'NAMEPLATE'])
+        else:
+            total_capacity = sum(config['max_domestic_capacity'] for config in WA_PRODUCTION_FACILITIES.values())
+            avg_capacity = total_capacity / len(WA_PRODUCTION_FACILITIES)
+            production_facilities = sum(1 for config in WA_PRODUCTION_FACILITIES.values() if config['status'] == 'operating')
+            nameplate_facilities = len(WA_PRODUCTION_FACILITIES)
+        
+        st.metric("Total System Capacity", f"{total_capacity:,.0f} TJ/day")
+        st.metric("Average Facility Capacity", f"{avg_capacity:.0f} TJ/day")
+        st.metric("Production Facilities", production_facilities)
+        st.metric("Total Facilities", nameplate_facilities)
+        
+        # Capacity by region chart
+        if capacity_df is not None and not capacity_df.empty:
+            region_capacity = {}
+            for _, row in capacity_df.iterrows():
+                facility = row['dashboard_facility']
+                capacity = row['capacity_tj_day']
+                region = WA_PRODUCTION_FACILITIES.get(facility, {}).get('region', 'Unknown')
+                region_capacity[region] = region_capacity.get(region, 0) + capacity
+        else:
+            region_capacity = {}
+            for facility, config in WA_PRODUCTION_FACILITIES.items():
+                region = config.get('region', 'Unknown')
+                capacity = config['max_domestic_capacity']
+                region_capacity[region] = region_capacity.get(region, 0) + capacity
+        
+        # Create region capacity pie chart
+        fig_region = px.pie(
+            values=list(region_capacity.values()),
+            names=list(region_capacity.keys()),
+            title='Capacity by Region',
+            height=300
+        )
+        st.plotly_chart(fig_region, use_container_width=True)
+
+# ==============================================================================
+# MAIN APPLICATION WITH ENHANCED NAVIGATION
 # ==============================================================================
 
 def main():
-    """Main application with enhanced real data integration"""
+    """Main application with enhanced real data integration and comprehensive navigation"""
     
     # Enhanced sidebar with comprehensive data monitoring
     with st.sidebar:
-        st.markdown("## 📡 Enhanced WA Gas Dashboard")
+        st.markdown("## 📡 WA Gas Market Dashboard")
+        st.markdown("*Professional Real-Time Analytics*")
         
-        # Data source health check
+        # Comprehensive data source health check
         availability = check_data_source_availability()
         total_sources = len(availability)
         active_sources = sum(availability.values())
         
         health_color = "🟢" if active_sources >= 3 else "🟡" if active_sources >= 1 else "🔴"
-        st.markdown(f"### {health_color} System Health: {active_sources}/{total_sources}")
+        health_percentage = (active_sources / total_sources * 100)
         
-        # Navigation
+        st.markdown(f"### {health_color} System Health: {health_percentage:.0f}%")
+        st.progress(health_percentage / 100)
+        
+        # Enhanced navigation with detailed descriptions
         selected_module = st.radio(
             "Dashboard Modules:",
             [
                 "🎯 Command Center",
+                "🏭 Facility Capacity Analysis",
                 "⚡ Fundamental Analysis", 
                 "📈 Market Structure",
-                "🏭 Large Users Registry",
+                "📰 News & Intelligence",
                 "🌦️ Weather & Risk",
                 "🧮 Advanced Analytics"
             ],
-            index=0
-        )
-        
-        st.markdown("---")
-        
-        # Real-time data source status
-        st.markdown("### 📊 Data Source Status")
-        
-        source_status = {
-            "AEMO GBB API": availability.get('AEMO_GBB_API', False),
-            "Public Dashboard": availability.get('AEMO_Public_Dashboard', False),
-            "WA Gov Portal": availability.get('WA_Gov_Data', False),
-            "News Feeds": True,  # Always available
-            "GSOO Baseline": True   # Always available
-        }
-        
-        for source, status in source_status.items():
-            status_icon = "✅" if status else "❌"
-            status_class = "api-live" if status else "api-error"
-            st.markdown(f'<span class="api-status {status_class}">{status_icon} {source}</span>', 
-                       unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Production facilities overview
-        st.markdown("### 🏭 WA Production Facilities")
-        
-        facility_status_counts = {}
-        for config in WA_PRODUCTION_FACILITIES.values():
-            status = config['status']
-            facility_status_counts[status] = facility_status_counts.get(status, 0) + 1
-        
-        for status, count in facility_status_counts.items():
-            status_icon = {'operating': '🟢', 'ramping': '🟡', 'declining': '🟠', 'future': '⚪'}.get(status, '❓')
-            st.markdown(f"**{status_icon} {status.title()}:** {count} facilities")
-        
-        total_capacity = sum(config['max_domestic_capacity'] for config in WA_PRODUCTION_FACILITIES.values())
-        st.markdown(f"**Total System Capacity:** {total_capacity:,} TJ/day")
-        
-        st.markdown("---")
-        
-        # Quick actions
-        st.markdown("### ⚡ Quick Actions")
-        
-        if st.button("🔄 Refresh All Data", type="primary"):
-            st.cache_data.clear()
-            st.success("✅ Cache cleared - refreshing...")
-            st.rerun()
-        
-        if st.button("📊 System Health Check"):
-            with st.spinner("Checking all data sources..."):
-                new_availability = check_data_source_availability()
-                st.write("**Data Source Health:**")
-                for source, status in new_availability.items():
-                    st.write(f"{'✅' if status else '❌'} {source.replace('_', ' ')}")
-        
-        # Performance metrics
-        cache_info = st.cache_data.clear.__wrapped__.__doc__
-        st.markdown("---")
-        st.markdown("### 📈 Performance")
-        st.markdown(f"**Cache TTL:** 30 min (production), 60 min (fundamentals)")
-        st.markdown(f"**Last System Check:** {datetime.now().strftime('%H:%M:%S')}")
-        
-        st.markdown("---")
-        st.markdown("""
-        ### 📋 Data Sources
-        - **🔌 AEMO WA Gas Bulletin Board**
-        - **📊 WA Gas Statement of Opportunities 2024**
-        - **🏛️ WA Government Data Portal**
-        - **📰 Real-time News Feeds (RSS)**
-        - **💹 Market Intelligence Sources**
-        """)
-        
-        # Footer
-        st.markdown("---")
-        st.markdown("**Enhanced Dashboard v2.0**")
-        st.markdown("*Professional WA gas market analytics*")
-    
-    # Route to enhanced modules
-    if selected_module == "🎯 Command Center":
-        display_enhanced_command_center()
-        
-    elif selected_module == "⚡ Fundamental Analysis":
-        st.markdown("### ⚡ Enhanced Fundamental Analysis")
-        st.info("🚧 Enhanced fundamental analysis with real storage data coming soon...")
-        
-        # Placeholder for enhanced fundamental analysis
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### Real Storage Data")
-            st.markdown("- AEMO storage levels")
-            st.markdown("- Seasonal comparisons")
-            st.markdown("- 5-year historical context")
-        
-        with col2:
-            st.markdown("#### Supply/Demand Balance")
-            st.markdown("- Real-time adequacy ratios")
-            st.markdown("- Seasonal demand patterns")
-            st.markdown("- Capacity utilization analysis")
-        
-    elif selected_module == "📈 Market Structure":
-        st.markdown("### 📈 Enhanced Market Structure")
-        st.info("🚧 Real-time pricing and forward curve analysis coming soon...")
-        
-    elif selected_module == "🏭 Large Users Registry":
-        st.markdown("### 🏭 Enhanced Large Users Registry")
-        
-        # Fetch and display large users with enhanced features
-        try:
-            large_users_df = pd.DataFrame([
-                {
-                    'Facility_Code': f'WA{i:03d}',
-                    'Facility_Name': config.get('operator', 'Unknown'),
-                    'Category': 'Gas Production',
-                    'Max_Capacity_TJ': config['max_domestic_capacity'],
-                    'Typical_Output_TJ': config.get('typical_output', 0),
-                    'Status': config['status'].title(),
-                    'Region': config.get('region', 'Unknown')
-                }
-                for i, (facility, config) in enumerate(WA_PRODUCTION_FACILITIES.items())
-            ])
-            
-            st.dataframe(large_users_df, use_container_width=True, height=400)
-            st.markdown("*📊 Production facilities registry based on GSOO 2024*")
-            
-        except Exception as e:
-            st.error(f"❌ Unable to load facilities registry: {e}")
-        
-    else:
-        st.markdown(f"### {selected_module}")
-        st.info("🚧 This module is being enhanced with additional real data integration...")
-
-if __name__ == "__main__":
-    main()
+            index=0,
+            help="Select a module to explore
