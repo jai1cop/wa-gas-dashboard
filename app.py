@@ -77,35 +77,65 @@ def fetch_demand_data():
 
 @st.cache_data(ttl=900)
 def fetch_large_users_data():
-    """Fetch all large users data - NO 20-row limit"""
-    # Simulated comprehensive large users dataset
+    """Fetch all WA large users data - WESTERN AUSTRALIAN ASSETS ONLY"""
     np.random.seed(44)
     
-    facilities = [
-        "Alcoa Kwinana", "Alcoa Pinjarra", "Alcoa Wagerup", "Parkeston Power Station",
-        "Synergy Kwinana", "Synergy Cockburn", "Origin Kwinana", "Alinta Pinjarra",
-        "BHP Nickel West", "Rio Tinto Yarwun", "Woodside Pluto", "Chevron Gorgon",
-        "Shell Prelude", "Santos GLNG", "Origin Australia Pacific LNG", "ExxonMobil PNG",
-        "Inpex Ichthys", "Quadrant Browse", "ConocoPhillips Darwin", "Total Gladstone",
-        "Arrow Energy Surat", "APLNG Curtis Island", "Queensland Gas Company",
-        "Santos Cooper Basin", "Beach Energy Otway", "Strike Energy Perth Basin",
-        "Woodside Browse", "Chevron Wheatstone", "Shell Queensland Curtis",
-        "Origin Ironbark", "Santos Narrabri", "Senex Energy Surat", "Blue Energy CSG",
-        "Metgasco Northern Rivers", "Eastern Star Gas Hunter", "Pangaea Resources",
-        "Real Energy Corporation", "Armour Energy Kincora", "Vintage Energy Cooper",
-        "Cooper Energy Sole", "3D Oil Gippsland", "88 Energy Alaska", "Carnarvon Dorado",
-        "FAR Sangomar", "Karoon Gas Santos Basin", "New Hope Acland", "Stanmore Resources",
-        "Coronado Global Resources", "Peabody Energy Australia", "Glencore Coal Assets",
-        "BHP Mt Arthur", "Rio Tinto Hunter Valley", "Anglo American Moranbah"
+    # Corrected list - WA gas market facilities only
+    wa_facilities = [
+        # LNG Export Facilities
+        "Woodside Karratha Gas Plant", "Chevron Gorgon Train 1", "Chevron Gorgon Train 2", 
+        "Chevron Gorgon Train 3", "Chevron Wheatstone Train 1", "Chevron Wheatstone Train 2",
+        "Woodside Pluto Train 1", "Shell Prelude FLNG", "Woodside Browse (Proposed)",
+        
+        # Domestic Gas Production
+        "Apache Varanus Island", "Woodside North Rankin Complex", "Woodside Goodwyn Alpha",
+        "BHP Macedon Gas Plant", "Apache Devil Creek", "Origin Kwinana Power Station",
+        "Synergy Kwinana Power Station", "Synergy Cockburn Power Station", "NewGen Kwinana",
+        
+        # Perth Basin Facilities  
+        "AWE Waitsia/Xyris Gas Plant", "Origin Beharra Springs", "Strike Energy Perth Basin",
+        "AWE Dongara Gas Plant", "Norwest Energy Arrowsmith", "Pilot Energy Cliff Head",
+        "Triangle Energy Cliff Head", "Roc Oil Zhao Dong", "AWE Red Gully",
+        
+        # Industrial & Mining Users
+        "Alcoa Kwinana Refinery", "Alcoa Pinjarra Refinery", "Alcoa Wagerup Refinery",
+        "BHP Nickel West Kalgoorlie", "BHP Nickel West Kambalda", "Tianqi Lithium Kwinana",
+        "CSBP Kwinana Ammonia", "Wesfarmers CSBP Chemicals", "Burrup Fertilisers Karratha",
+        "Yara Pilbara Ammonia", "Rio Tinto Dampier Salt", "Fortescue Christmas Creek",
+        "Fortescue Cloudbreak", "Roy Hill Iron Ore", "Mt Gibson Iron", "Mineral Resources",
+        
+        # Power Generation
+        "Synergy Pinjar Power Station", "Alinta Pinjarra Power Station", "Alinta Wagerup Power Station",
+        "ERM Power Neerabup", "Parkeston Power Station", "Geraldton Power Station",
+        "Mumbida Wind Farm Gas Backup", "Alinta Newman Power Station", "Horizon Power Esperance",
+        
+        # Gas Storage & Infrastructure
+        "APA Mondarra Gas Storage", "APA Tubridgi Gas Storage", "APA Parmelia Pipeline",
+        "DBNGP Compressor Stations", "Goldfields Gas Pipeline", "Pilbara Energy Pipeline",
+        
+        # Other Industrial
+        "CBH Group Grain Terminals", "Kleenheat Gas WA", "ATCO Gas Distribution",
+        "Water Corporation Perth", "Cockburn Cement", "Adelaide Brighton Munster"
     ]
     
     large_users = pd.DataFrame({
-        'facilityCode': [f'F{i:03d}' for i in range(len(facilities))],
-        'facilityName': facilities,
-        'usageCategory': np.random.choice(['Power Generation', 'Industrial', 'Mining', 'LNG Export', 'Manufacturing'], len(facilities)),
-        'consumptionTJ': np.random.lognormal(4, 1, len(facilities)),
-        'utilizationPct': np.random.uniform(60, 95, len(facilities)),
-        'region': np.random.choice(['North', 'South', 'Central', 'East'], len(facilities))
+        'facilityCode': [f'WA{i:03d}' for i in range(len(wa_facilities))],
+        'facilityName': wa_facilities,
+        'usageCategory': np.random.choice([
+            'LNG Export', 'Power Generation', 'Industrial Processing', 
+            'Mining Operations', 'Gas Production', 'Gas Infrastructure',
+            'Chemicals & Fertilizers', 'Metals Processing'
+        ], len(wa_facilities)),
+        'consumptionTJ': np.random.lognormal(4, 1, len(wa_facilities)),
+        'utilizationPct': np.random.uniform(60, 95, len(wa_facilities)),
+        'region': np.random.choice([
+            'North West Shelf', 'Perth Basin', 'Pilbara', 'South West', 
+            'Goldfields', 'Mid West', 'Kimberley'
+        ], len(wa_facilities)),
+        'gasSource': np.random.choice([
+            'North West Shelf', 'Perth Basin', 'Carnarvon Basin', 
+            'Storage', 'Import'
+        ], len(wa_facilities))
     })
     
     # Sort by consumption (highest first)
