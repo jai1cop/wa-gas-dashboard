@@ -260,10 +260,11 @@ WA_PRODUCTION_FACILITIES = {
 # DATA FETCHING FUNCTIONS (Cached for Performance)
 # ==============================================================================
 
-@st.cache_data(ttl=900)  # 15-minute cache
+@st.cache_data(ttl=900)
 def fetch_production_facility_data():
-    """Fetch WA production facility data based on GBB/GSOO sources"""
-    dates = pd.date_range(start=datetime.now() - timedelta(days=90), end=datetime.now() + timedelta(days=30), freq='D')
+    """Fetch WA production facility data - FIXED VERSION"""
+    dates = pd.date_range(start=datetime.now() - timedelta(days=90), 
+                         end=datetime.now(), freq='D')  # Remove future dates for now
     np.random.seed(42)
     
     # Create realistic production data for each facility
@@ -274,37 +275,28 @@ def fetch_production_facility_data():
         status = config['status']
         
         if status == 'operating':
-            # Operating facilities: 70-95% utilization with some variation
+            # Operating facilities: 70-95% utilization
             base_utilization = np.random.uniform(0.70, 0.95, len(dates))
             production = base_utilization * max_capacity
             
         elif status == 'ramping':
-            # Ramping facilities: gradual increase over time
-            start_util = 0.3
-            end_util = 0.8
-            utilization_trend = np.linspace(start_util, end_util, len(dates))
+            # Ramping facilities: gradual increase
+            start_util = np.linspace(0.3, 0.8, len(dates))
             noise = np.random.normal(0, 0.05, len(dates))
-            production = (utilization_trend + noise) * max_capacity
+            production = np.maximum((start_util + noise) * max_capacity, 0)
             
         elif status == 'declining':
             # Declining facilities: gradual decrease
-            start_util = 0.6
-            end_util = 0.2
-            utilization_trend = np.linspace(start_util, end_util, len(dates))
+            decline_util = np.linspace(0.6, 0.2, len(dates))
             noise = np.random.normal(0, 0.03, len(dates))
-            production = (utilization_trend + noise) * max_capacity
+            production = np.maximum((decline_util + noise) * max_capacity, 0)
             
-        elif status == 'future':
-            # Future facilities: zero until start date, then ramp
+        else:  # future facilities
+            # Future facilities: zero production for now
             production = np.zeros(len(dates))
-            future_start = len(dates) - 30  # Start in last 30 days for demo
-            if future_start > 0:
-                production[future_start:] = np.linspace(0, 0.6 * max_capacity, 30)
         
-        # Ensure non-negative values and respect capacity limits
-        production = np.maximum(production, 0)
-        production = np.minimum(production, max_capacity)
-        
+        # Ensure values are within bounds
+        production = np.clip(production, 0, max_capacity)
         production_data[facility] = production
     
     df = pd.DataFrame(production_data)
@@ -317,25 +309,29 @@ def fetch_production_facility_data():
 
 @st.cache_data(ttl=900)
 def fetch_market_demand_data():
-    """Fetch WA market demand data"""
-    dates = pd.date_range(start=datetime.now() - timedelta(days=90), end=datetime.now() + timedelta(days=30), freq='D')
+    """Fetch WA market demand data - FIXED VERSION"""
+    dates = pd.date_range(start=datetime.now() - timedelta(days=90), 
+                         end=datetime.now(), freq='D')  # Match production dates
     np.random.seed(43)
     
-    # Seasonal demand pattern for WA (higher in winter)
+    # Create realistic demand pattern
+    base_demand = 1400  # TJ/day average for WA
+    
+    # Add seasonal variation (higher in winter)
     day_of_year = dates.dayofyear
-    seasonal_factor = 1 + 0.3 * np.cos(2 * np.pi * (day_of_year - 180) / 365)  # Peak in winter (day 180)
+    seasonal_factor = 1 + 0.2 * np.cos(2 * np.pi * (day_of_year - 180) / 365)
     
-    # Base demand with seasonal variation and random noise
-    base_demand = 1400  # TJ/day average
-    demand = base_demand * seasonal_factor + np.random.normal(0, 100, len(dates))
+    # Add daily variation
+    daily_noise = np.random.normal(0, 80, len(dates))
     
-    # Ensure demand is positive
-    demand = np.maximum(demand, 800)
+    demand = base_demand * seasonal_factor + daily_noise
+    demand = np.maximum(demand, 800)  # Minimum realistic demand
     
     return pd.DataFrame({
         'Date': dates,
         'Market_Demand': demand
     })
+
 
 @st.cache_data(ttl=900)
 def fetch_storage_data():
@@ -491,33 +487,56 @@ def fetch_large_users_data():
 # ==============================================================================
 
 def create_facility_supply_demand_chart(production_df, demand_df, selected_facilities=None):
-    """Create supply by facility stacked area chart with demand overlay"""
+    """Create supply by facility chart - FIXED VERSION"""
     
-    # Merge production and demand data
-    chart_data = production_df.merge(demand_df, on='Date')
+    # Ensure we have data
+    if production_df.empty or demand_df.empty:
+        st.error("No data available for chart generation")
+        return go.Figure()
+    
+    # Merge data on Date column
+    try:
+        chart_data = production_df.merge(demand_df, on='Date', how='inner')
+    except Exception as e:
+        st.error(f"Data merge failed: {e}")
+        return go.Figure()
+    
+    if chart_data.empty:
+        st.error("No matching dates between supply and demand data")
+        return go.Figure()
     
     fig = go.Figure()
     
-    # Get facility columns (exclude Date, Total_Supply, Market_Demand)
+    # Get facility columns
     facility_columns = [col for col in production_df.columns 
                        if col not in ['Date', 'Total_Supply']]
     
-    # Filter facilities if specified
+    # Use selected facilities or default to operating ones
     if selected_facilities:
-        facility_columns = [f for f in facility_columns if f in selected_facilities]
+        display_facilities = [f for f in facility_columns if f in selected_facilities]
+    else:
+        display_facilities = [f for f in facility_columns 
+                            if WA_PRODUCTION_FACILITIES.get(f, {}).get('status') == 'operating']
     
-    # Add stacked areas for each production facility
-    for i, facility in enumerate(facility_columns):
+    if not display_facilities:
+        st.warning("No facilities selected or available for display")
+        return go.Figure()
+    
+    # Add stacked areas for each facility
+    for i, facility in enumerate(display_facilities):
+        if facility not in chart_data.columns:
+            continue
+            
         config = WA_PRODUCTION_FACILITIES.get(facility, {})
-        color = config.get('color', f'rgba({i*50 % 255}, {i*80 % 255}, {i*120 % 255}, 0.7)')
+        color = config.get('color', f'hsl({i*360/len(display_facilities)}, 70%, 60%)')
         max_capacity = config.get('max_domestic_capacity', 100)
         
-        # Cap production at facility's maximum capacity
-        capped_production = np.minimum(chart_data[facility], max_capacity)
+        # Get production data
+        production_values = chart_data[facility].fillna(0)
         
         fig.add_trace(go.Scatter(
             x=chart_data['Date'],
-            y=capped_production,
+            y=production_values,
             name=facility,
             stackgroup='supply',
             mode='none',
@@ -527,93 +546,38 @@ def create_facility_supply_demand_chart(production_df, demand_df, selected_facil
             hovertemplate=f'<b>{facility}</b><br>' +
                          'Date: %{x}<br>' +
                          'Production: %{y:.1f} TJ/day<br>' +
-                         f'Capacity: {max_capacity} TJ/day<extra></extra>'
+                         f'Max Capacity: {max_capacity} TJ/day<extra></extra>'
         ))
     
-    # Add market demand overlay (bold line)
+    # Add demand line
     fig.add_trace(go.Scatter(
         x=chart_data['Date'],
         y=chart_data['Market_Demand'],
         name='Market Demand',
         mode='lines',
-        line=dict(color='#1f2937', width=4),
+        line=dict(color='black', width=4),
         hovertemplate='<b>Market Demand</b><br>' +
                      'Date: %{x}<br>' +
                      'Demand: %{y:.1f} TJ/day<extra></extra>'
     ))
     
-    # Calculate and highlight supply deficits
-    total_capped_supply = sum(np.minimum(chart_data[facility], 
-                                       WA_PRODUCTION_FACILITIES.get(facility, {}).get('max_domestic_capacity', 1000))
-                            for facility in facility_columns)
-    
-    deficit_mask = chart_data['Market_Demand'] > total_capped_supply
-    if deficit_mask.any():
-        deficit_dates = chart_data.loc[deficit_mask, 'Date']
-        deficit_demands = chart_data.loc[deficit_mask, 'Market_Demand']
-        
-        # Add deficit highlighting
-        fig.add_trace(go.Scatter(
-            x=deficit_dates,
-            y=deficit_demands,
-            name='Supply Deficit',
-            mode='markers',
-            marker=dict(color='red', size=8, symbol='triangle-down'),
-            showlegend=False,
-            hovertemplate='<b>Supply Deficit</b><br>' +
-                         'Date: %{x}<br>' +
-                         'Demand exceeds capacity<extra></extra>'
-        ))
-        
-        # Add annotations for significant deficits
-        for idx, (date, demand) in enumerate(zip(deficit_dates.head(3), deficit_demands.head(3))):
-            fig.add_annotation(
-                x=date,
-                y=demand,
-                text="⚠️ Capacity Shortfall",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor='red',
-                bgcolor='rgba(255,255,255,0.9)',
-                bordercolor='red'
-            )
-    
-    # Clean layout following Tufte's principles
+    # Update layout
     fig.update_layout(
-        title=dict(
-            text='WA Gas Supply by Production Facility vs Market Demand',
-            font=dict(size=20, color='#1f2937'),
-            x=0.02
-        ),
-        xaxis=dict(
-            title='',
-            showgrid=False,
-            zeroline=False,
-            showline=True,
-            linecolor='#e5e7eb'
-        ),
-        yaxis=dict(
-            title='Gas Flow (TJ/day)',
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='#f3f4f6',
-            zeroline=False
-        ),
+        title='WA Gas Supply by Production Facility vs Market Demand',
+        xaxis_title='Date',
+        yaxis_title='Gas Flow (TJ/day)',
         plot_bgcolor='white',
         paper_bgcolor='white',
         hovermode='x unified',
+        height=600,
         legend=dict(
             orientation='v',
             yanchor='top',
             y=1,
             xanchor='left',
-            x=1.02,
-            bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='#e5e7eb',
-            borderwidth=1
+            x=1.02
         ),
-        height=600,
-        margin=dict(l=50, r=200, t=60, b=50)  # Extra right margin for legend
+        margin=dict(l=50, r=200, t=60, b=50)
     )
     
     return fig
@@ -827,56 +791,36 @@ def display_command_center():
     
     with col4:
         # Market Balance
-        production_df = fetch_production_facility_data()
-        demand_df = fetch_market_demand_data()
-        
-        today_supply = production_df['Total_Supply'].iloc[-1]
-        today_demand = demand_df['Market_Demand'].iloc[-1]
-        today_balance = today_supply - today_demand
-        
-        balance_status = "Surplus" if today_balance > 0 else "Deficit"
-        balance_color = "#16a34a" if today_balance > 0 else "#dc2626"
-        
-        st.markdown(f"""
-        <div class="kpi-card">
-            <p class="kpi-value" style="color: {balance_color};">{abs(today_balance):.0f}</p>
-            <p class="kpi-label">Market {balance_status} (TJ/day)</p>
-            <p class="kpi-delta" style="color: {balance_color};">
-                {'⬆️' if today_balance > 0 else '⬇️'} {balance_status}
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Main Content Area
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Interactive Supply & Demand Chart by Production Facility
-        st.markdown("### Supply by Production Facility vs Market Demand")
-        
-        # Chart controls (Interactive exploration)
-        control_col1, control_col2, control_col3 = st.columns(3)
-        with control_col1:
-            chart_period = st.selectbox("Time Period", ["Last 30 Days", "Last 90 Days", "YTD"], index=1)
-        with control_col2:
-            show_future = st.checkbox("Include Future Facilities", value=True)
-        with control_col3:
-            all_facilities = list(WA_PRODUCTION_FACILITIES.keys())
-            if st.button("Select All Facilities"):
-                st.session_state.selected_facilities = all_facilities
-        
-        # Facility selector
-        default_facilities = [f for f, config in WA_PRODUCTION_FACILITIES.items() 
-                            if config['status'] in ['operating', 'ramping']]
-        
-        selected_facilities = st.multiselect(
-            "Select Production Facilities to Display:",
-            options=all_facilities,
-            default=default_facilities,
-            key="facility_selector"
-        )
+        # Generate facility supply chart - FIXED
+production_df = fetch_production_facility_data()
+demand_df = fetch_market_demand_data()
+
+# Debug information
+st.write(f"Production data shape: {production_df.shape}")
+st.write(f"Demand data shape: {demand_df.shape}")
+st.write(f"Production date range: {production_df['Date'].min()} to {production_df['Date'].max()}")
+st.write(f"Demand date range: {demand_df['Date'].min()} to {demand_df['Date'].max()}")
+
+# Filter based on period selection
+if chart_period == "Last 30 Days":
+    cutoff_date = datetime.now() - timedelta(days=30)
+    production_df = production_df[production_df['Date'] >= cutoff_date]
+    demand_df = demand_df[demand_df['Date'] >= cutoff_date]
+elif chart_period == "YTD":
+    cutoff_date = datetime(datetime.now().year, 1, 1)
+    production_df = production_df[production_df['Date'] >= cutoff_date]
+    demand_df = demand_df[demand_df['Date'] >= cutoff_date]
+
+# Ensure we have default facilities selected
+if not selected_facilities:
+    default_facilities = ['Karratha Gas Plant (NWS)', 'Gorgon', 'Wheatstone', 'Varanus Island']
+    selected_facilities = [f for f in default_facilities if f in WA_PRODUCTION_FACILITIES]
+
+if selected_facilities and not production_df.empty and not demand_df.empty:
+    fig_facility = create_facility_supply_demand_chart(production_df, demand_df, selected_facilities)
+    st.plotly_chart(fig_facility, use_container_width=True)
+else:
+    st.error("Unable to generate chart. Check data availability and facility selection.")
         
         # Generate facility supply chart
         production_df = fetch_production_facility_data()
