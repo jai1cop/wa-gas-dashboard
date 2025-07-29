@@ -1697,7 +1697,7 @@ def main():
         st.markdown(f"### {health_color} System Health: {health_percentage:.0f}%")
         st.progress(health_percentage / 100)
         
-        # Enhanced navigation with detailed descriptions
+               # Enhanced navigation with detailed descriptions
         selected_module = st.radio(
             "Dashboard Modules:",
             [
@@ -1710,4 +1710,187 @@ def main():
                 "🧮 Advanced Analytics"
             ],
             index=0,
-            help="Select a module to explore
+            help="Select a module to explore different aspects of the WA gas market"
+        )
+        
+        st.markdown("---")
+        
+        # Real-time data source status with enhanced monitoring
+        st.markdown("### 📊 Data Source Status")
+        
+        source_status = {
+            "Medium Term Capacity API": availability.get('Medium_Term_Capacity', False),
+            "AEMO GBB API": availability.get('AEMO_GBB_API', False),
+            "Public Dashboard": availability.get('AEMO_Public_Dashboard', False),
+            "WA Gov Portal": availability.get('WA_Gov_Data', False),
+            "News Feeds": FEEDPARSER_AVAILABLE,
+            "GSOO Baseline": True   # Always available
+        }
+        
+        for source, status in source_status.items():
+            status_icon = "✅" if status else "❌"
+            status_class = "api-live" if status else "api-error"
+            st.markdown(f'<span class="api-status {status_class}">{status_icon} {source}</span>', 
+                       unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Production facilities overview with enhanced details
+        st.markdown("### 🏭 WA Production Facilities")
+        
+        facility_status_counts = {}
+        total_capacity = 0
+        api_updated_count = 0
+        
+        for facility, config in WA_PRODUCTION_FACILITIES.items():
+            status = config['status']
+            facility_status_counts[status] = facility_status_counts.get(status, 0) + 1
+            total_capacity += config['max_domestic_capacity']
+            
+            if config.get('capacity_source') == 'Medium Term Capacity API':
+                api_updated_count += 1
+        
+        for status, count in facility_status_counts.items():
+            status_icon = {'operating': '🟢', 'ramping': '🟡', 'declining': '🟠', 'future': '⚪'}.get(status, '❓')
+            st.markdown(f"**{status_icon} {status.title()}:** {count} facilities")
+        
+        st.markdown(f"**Total System Capacity:** {total_capacity:,} TJ/day")
+        st.markdown(f"**API Updated Facilities:** {api_updated_count}/{len(WA_PRODUCTION_FACILITIES)}")
+        
+        st.markdown("---")
+        
+        # Quick actions with enhanced functionality
+        st.markdown("### ⚡ Quick Actions")
+        
+        if st.button("🔄 Refresh All Data", type="primary"):
+            st.cache_data.clear()
+            st.success("✅ Cache cleared - refreshing...")
+            st.rerun()
+        
+        if st.button("📊 System Health Check"):
+            with st.spinner("Checking all data sources..."):
+                new_availability = check_data_source_availability()
+                st.write("**Data Source Health:**")
+                for source, status in new_availability.items():
+                    st.write(f"{'✅' if status else '❌'} {source.replace('_', ' ')}")
+        
+        if st.button("🏭 Test Capacity API"):
+            with st.spinner("Testing Medium Term Capacity API..."):
+                capacity_df, error = fetch_medium_term_capacity_data()
+                if error is None:
+                    st.success(f"✅ API Connected - {len(capacity_df)} facilities loaded")
+                else:
+                    st.error(f"❌ API Error: {error}")
+        
+        # Performance metrics
+        st.markdown("---")
+        st.markdown("### 📈 Performance")
+        st.markdown(f"**Cache TTL:** 30 min (production), 60 min (capacity)")
+        st.markdown(f"**Last System Check:** {datetime.now().strftime('%H:%M:%S')}")
+        st.markdown(f"**Active Sources:** {active_sources}/{total_sources}")
+        
+        st.markdown("---")
+        st.markdown("""
+        ### 📋 Data Sources
+        - **🔌 AEMO Medium Term Capacity API**
+        - **📊 AEMO WA Gas Bulletin Board**
+        - **🏛️ WA Gas Statement of Opportunities 2024**
+        - **📰 Real-time RSS News Feeds**
+        - **💹 Live Market Intelligence**
+        """)
+        
+        # Footer with version info
+        st.markdown("---")
+        st.markdown("**Enhanced Dashboard v2.1**")
+        st.markdown("*Professional WA Gas Market Analytics*")
+        st.markdown(f"*Built: {datetime.now().strftime('%Y-%m-%d')}*")
+    
+    # Route to enhanced modules with comprehensive error handling
+    try:
+        if selected_module == "🎯 Command Center":
+            display_enhanced_command_center()
+            
+        elif selected_module == "🏭 Facility Capacity Analysis":
+            display_enhanced_facility_capacity_analysis()
+            
+        elif selected_module == "⚡ Fundamental Analysis":
+            st.markdown("### ⚡ Enhanced Fundamental Analysis")
+            st.info("🚧 Enhanced fundamental analysis with real storage data coming soon...")
+            
+            # Placeholder for enhanced fundamental analysis
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Real Storage Data")
+                st.markdown("- AEMO storage levels")
+                st.markdown("- Seasonal comparisons")
+                st.markdown("- 5-year historical context")
+            
+            with col2:
+                st.markdown("#### Supply/Demand Balance")
+                st.markdown("- Real-time adequacy ratios")
+                st.markdown("- Seasonal demand patterns")
+                st.markdown("- Capacity utilization analysis")
+            
+        elif selected_module == "📈 Market Structure":
+            st.markdown("### 📈 Enhanced Market Structure")
+            st.info("🚧 Real-time pricing and forward curve analysis coming soon...")
+            
+        elif selected_module == "📰 News & Intelligence":
+            st.markdown("### 📰 Market News & Intelligence")
+            
+            # Display news feed as standalone module
+            news_items = fetch_real_news_feed_enhanced()
+            
+            # Enhanced news interface
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                for item in news_items:
+                    sentiment_class_map = {'+': 'sentiment-positive', '-': 'sentiment-negative', 'N': 'sentiment-neutral'}
+                    sentiment_icon_map = {'+': '📈', '-': '📉', 'N': '📰'}
+                    
+                    st.markdown(f"""
+                    <div class="news-item">
+                        <span class="{sentiment_class_map[item['sentiment']]}" style="margin-right: 0.5rem; font-size: 1.2rem;">
+                            {sentiment_icon_map[item['sentiment']]}
+                        </span>
+                        <div style="flex: 1;">
+                            <a href="{item['url']}" target="_blank" class="news-headline">
+                                {item['headline']}
+                            </a><br>
+                            <small style="color: #64748b;">{item['source']} • {item['timestamp']}</small>
+                            <div style="margin-top: 0.25rem; font-size: 0.875rem; color: #374151;">
+                                {item['summary']}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown("#### News Summary")
+                positive_count = sum(1 for item in news_items if item['sentiment'] == '+')
+                negative_count = sum(1 for item in news_items if item['sentiment'] == '-')
+                neutral_count = sum(1 for item in news_items if item['sentiment'] == 'N')
+                
+                st.metric("📈 Positive", positive_count)
+                st.metric("📉 Negative", negative_count)
+                st.metric("📰 Neutral", neutral_count)
+            
+        elif selected_module == "🌦️ Weather & Risk":
+            st.markdown("### 🌦️ Weather & Risk Monitoring")
+            st.info("🚧 Weather dashboard and geopolitical risk heatmap coming soon...")
+            
+        elif selected_module == "🧮 Advanced Analytics":
+            st.markdown("### 🧮 Advanced Analytics Workbench")
+            st.info("🚧 Advanced quantitative analytics tools coming soon...")
+            
+        else:
+            st.markdown(f"### {selected_module}")
+            st.info("🚧 This module is being enhanced with additional features...")
+            
+    except Exception as e:
+        st.error(f"❌ Module Error: {e}")
+        st.markdown("Please try refreshing the page or selecting a different module.")
+
+if __name__ == "__main__":
+    main()
