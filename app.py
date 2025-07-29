@@ -32,7 +32,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Enhanced CSS with real data indicators
+# Enhanced CSS with comprehensive styling
 st.markdown("""
 <style>
     /* Visual Hierarchy & Clean Design */
@@ -175,6 +175,22 @@ st.markdown("""
     .stPlotlyChart > div > div > div > div.modebar {
         display: none !important;
     }
+    
+    /* Loading States */
+    .loading-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f3f3f3;
+        border-radius: 50%;
+        border-top: 3px solid #3498db;
+        animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -296,14 +312,14 @@ WA_PRODUCTION_FACILITIES = {
 }
 
 # ==============================================================================
-# ENHANCED API DATA FETCHING WITH COMPREHENSIVE FALLBACKS
+# ENHANCED API DATA FETCHING WITH CSV-FIRST APPROACH
 # ==============================================================================
 
 def make_enhanced_api_request(url, params=None, timeout=30, retries=3):
-    """Enhanced API request with retries and comprehensive error handling"""
+    """Enhanced API request with better CSV detection and error handling"""
     headers = {
-        'User-Agent': 'WA-Gas-Dashboard/2.0 (Professional Analytics)',
-        'Accept': 'application/json, text/csv, application/xml',
+        'User-Agent': 'WA-Gas-Dashboard/2.1 (Professional Analytics)',
+        'Accept': 'text/csv, application/csv, application/json, text/plain, */*',
         'Accept-Encoding': 'gzip, deflate'
     }
     
@@ -313,20 +329,33 @@ def make_enhanced_api_request(url, params=None, timeout=30, retries=3):
             response = requests.get(url, params=params, headers=headers, timeout=timeout)
             response.raise_for_status()
             
-            # Handle different content types
+            # Enhanced content type detection
             content_type = response.headers.get('content-type', '').lower()
             
-            if 'application/json' in content_type:
-                return response.json(), None, 'json'
-            elif 'text/csv' in content_type or 'application/csv' in content_type:
+            # Check if it's CSV based on multiple indicators
+            is_csv = any([
+                'text/csv' in content_type,
+                'application/csv' in content_type,
+                url.endswith('.csv'),
+                response.text.strip().startswith('Date,') or response.text.strip().startswith('date,'),
+                ',' in response.text[:100] and '\n' in response.text[:100]  # Basic CSV pattern
+            ])
+            
+            if is_csv:
                 return response.text, None, 'csv'
+            elif 'application/json' in content_type:
+                return response.json(), None, 'json'
             else:
-                return response.text, None, 'text'
+                # Try to parse as CSV anyway if it looks like tabular data
+                if ',' in response.text[:200] and '\n' in response.text[:200]:
+                    return response.text, None, 'csv'
+                else:
+                    return response.text, None, 'text'
                 
         except requests.exceptions.RequestException as e:
             last_error = f"Attempt {attempt + 1}/{retries}: {str(e)}"
             if attempt < retries - 1:
-                time.sleep(2 ** attempt)  # Exponential backoff
+                time.sleep(2 ** attempt)
             continue
     
     return None, last_error, None
@@ -352,38 +381,231 @@ def check_data_source_availability():
     return availability
 
 # ==============================================================================
-# MEDIUM TERM CAPACITY API INTEGRATION
+# MEDIUM TERM CAPACITY API INTEGRATION (CSV-FIRST)
 # ==============================================================================
 
-@st.cache_data(ttl=3600)  # 1-hour cache for capacity data
-def fetch_medium_term_capacity_data():
-    """Fetch real medium-term capacity data from AEMO API"""
+@st.cache_data(ttl=3600)
+def fetch_medium_term_capacity_data_csv_first():
+    """Enhanced capacity data fetching - CSV-first approach"""
     
-    # Potential Medium Term Capacity API endpoints
-    capacity_endpoints = [
-        "https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current",
-        "https://aemo.com.au/api/v1/report/mediumTermCapacity/current",
-        "https://data.aemo.com.au/api/v1/report/mediumTermCapacity/current"
+    # CSV endpoints (often more accessible than JSON APIs)
+    csv_endpoints = [
+        "https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current.csv",
+        "https://aemo.com.au/aemo/data/wa/gbb/capacity/current.csv",
+        "https://data.aemo.com.au/gas/wa/capacity/medium-term-outlook.csv",
+        "https://www.aemo.com.au/-/media/files/gas/gbb/wa-medium-term-capacity.csv",
+        "https://aemo.com.au/-/media/files/gas/gbb/data/medium-term-capacity-outlook.csv"
     ]
     
-    for endpoint in capacity_endpoints:
+    # JSON endpoints (fallback)
+    json_endpoints = [
+        "https://gbb.aemo.com.au/api/v1/report/mediumTermCapacity/current",
+        "https://aemo.com.au/api/v1/report/mediumTermCapacity/current"
+    ]
+    
+    # Try CSV endpoints first
+    st.info("🔄 Trying CSV endpoints for Medium Term Capacity data...")
+    
+    for endpoint in csv_endpoints:
         try:
-            with st.spinner("🔄 Fetching real capacity data from Medium Term Capacity API..."):
+            with st.spinner(f"📊 Fetching CSV data from {endpoint.split('/')[-2]}..."):
                 data, error, content_type = make_enhanced_api_request(endpoint)
             
-            if data and not error:
-                if content_type == 'json':
-                    return process_medium_term_capacity_json(data), None
-                elif content_type == 'csv':
-                    return process_medium_term_capacity_csv(data), None
+            if data and not error and content_type == 'csv':
+                try:
+                    capacity_df = process_medium_term_capacity_csv(data)
+                    if not capacity_df.empty:
+                        st.success(f"✅ Successfully loaded capacity data from CSV endpoint")
+                        return capacity_df, None
+                except Exception as e:
+                    st.warning(f"⚠️ CSV processing failed: {e}")
+                    continue
                     
         except Exception as e:
-            st.warning(f"⚠️ Medium Term Capacity API failed: {e}")
+            st.warning(f"⚠️ CSV endpoint failed: {endpoint.split('/')[-1]} - {str(e)[:50]}...")
             continue
     
-    # Fallback to GSOO 2024 static values
-    st.info("📊 Using GSOO 2024 static capacity values (Medium Term Capacity API unavailable)")
-    return create_fallback_capacity_data(), "API unavailable"
+    # Try JSON endpoints as fallback
+    st.info("🔄 Trying JSON endpoints as fallback...")
+    
+    for endpoint in json_endpoints:
+        try:
+            with st.spinner(f"📡 Fetching JSON data from {endpoint.split('/')[-2]}..."):
+                data, error, content_type = make_enhanced_api_request(endpoint)
+            
+            if data and not error and content_type == 'json':
+                try:
+                    capacity_df = process_medium_term_capacity_json(data)
+                    if not capacity_df.empty:
+                        st.success(f"✅ Successfully loaded capacity data from JSON endpoint")
+                        return capacity_df, None
+                except Exception as e:
+                    st.warning(f"⚠️ JSON processing failed: {e}")
+                    continue
+                    
+        except Exception as e:
+            st.warning(f"⚠️ JSON endpoint failed: {endpoint.split('/')[-1]} - {str(e)[:50]}...")
+            continue
+    
+    # Final fallback
+    st.info("📊 Using GSOO 2024 static capacity values (all API endpoints unavailable)")
+    return create_fallback_capacity_data(), "All endpoints unavailable"
+
+def process_medium_term_capacity_csv(csv_data):
+    """Enhanced CSV processing for Medium Term Capacity data"""
+    
+    try:
+        # Parse CSV data
+        df = pd.read_csv(StringIO(csv_data))
+        
+        # Display column names for debugging
+        with st.expander("🔍 CSV Data Structure", expanded=False):
+            st.write("**Columns found:**", list(df.columns))
+            st.write("**Sample data:**")
+            st.dataframe(df.head(3))
+        
+        # Flexible column mapping to handle different CSV formats
+        column_mapping = {}
+        
+        # Map common column variations
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            
+            if any(x in col_lower for x in ['facility_code', 'facilitycode', 'facility code']):
+                column_mapping[col] = 'facility_code'
+            elif any(x in col_lower for x in ['facility_name', 'facilityname', 'facility name']):
+                column_mapping[col] = 'facility_name'
+            elif any(x in col_lower for x in ['capacity', 'quantity', 'volume']):
+                column_mapping[col] = 'capacity'
+            elif any(x in col_lower for x in ['capacity_type', 'capacitytype', 'type']):
+                column_mapping[col] = 'capacity_type'
+            elif any(x in col_lower for x in ['start_date', 'startdate', 'effective_date', 'gas_date']):
+                column_mapping[col] = 'effective_date'
+            elif any(x in col_lower for x in ['description', 'comment', 'notes']):
+                column_mapping[col] = 'description'
+        
+        # Rename columns
+        df = df.rename(columns=column_mapping)
+        
+        # Ensure required columns exist
+        required_columns = ['facility_code', 'capacity']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            st.warning(f"⚠️ Missing required columns: {missing_columns}")
+            return process_alternative_csv_format(df)
+        
+        # Clean and process data
+        df['capacity'] = pd.to_numeric(df['capacity'], errors='coerce')
+        df = df.dropna(subset=['capacity'])
+        df = df[df['capacity'] > 0]  # Only positive capacities
+        
+        # Map facility codes to dashboard names
+        capacity_records = []
+        
+        for _, row in df.iterrows():
+            facility_code = str(row.get('facility_code', '')).strip()
+            facility_name = str(row.get('facility_name', facility_code)).strip()
+            capacity = row.get('capacity', 0)
+            capacity_type = str(row.get('capacity_type', 'NAMEPLATE')).strip()
+            description = str(row.get('description', 'CSV Import')).strip()
+            effective_date = str(row.get('effective_date', '2024-01-01')).strip()
+            
+            # Map to dashboard facility names
+            dashboard_facility = map_facility_code_to_dashboard_name(facility_code, facility_name)
+            
+            if dashboard_facility and capacity > 0:
+                capacity_records.append({
+                    'dashboard_facility': dashboard_facility,
+                    'facility_code': facility_code,
+                    'facility_name': facility_name,
+                    'capacity_tj_day': capacity,
+                    'capacity_type': capacity_type,
+                    'description': description,
+                    'effective_date': effective_date
+                })
+        
+        if not capacity_records:
+            st.warning("⚠️ No WA facilities found in CSV data")
+            return pd.DataFrame()
+        
+        capacity_df = pd.DataFrame(capacity_records)
+        
+        # Get latest capacity for each facility (if multiple records exist)
+        latest_capacity = capacity_df.groupby('dashboard_facility').agg({
+            'capacity_tj_day': 'last',
+            'capacity_type': 'last', 
+            'description': 'last',
+            'effective_date': 'last'
+        }).reset_index()
+        
+        st.success(f"✅ Successfully processed CSV data for {len(latest_capacity)} WA facilities")
+        
+        return latest_capacity
+        
+    except Exception as e:
+        st.error(f"❌ CSV processing error: {e}")
+        return pd.DataFrame()
+
+def process_alternative_csv_format(df):
+    """Handle alternative CSV formats when standard processing fails"""
+    
+    st.info("🔄 Trying alternative CSV format processing...")
+    
+    # Look for any columns that might contain facility information
+    facility_candidates = []
+    capacity_candidates = []
+    
+    for col in df.columns:
+        col_lower = col.lower()
+        
+        # Check if column might contain facility names
+        if any(keyword in col_lower for keyword in ['facility', 'plant', 'station', 'site']):
+            facility_candidates.append(col)
+        
+        # Check if column might contain numeric capacity values
+        try:
+            numeric_values = pd.to_numeric(df[col], errors='coerce')
+            if not numeric_values.isna().all() and numeric_values.max() > 10:  # Reasonable capacity threshold
+                capacity_candidates.append(col)
+        except:
+            pass
+    
+    if facility_candidates and capacity_candidates:
+        st.info(f"🔍 Found potential facility columns: {facility_candidates}")
+        st.info(f"🔍 Found potential capacity columns: {capacity_candidates}")
+        
+        # Use first candidates
+        facility_col = facility_candidates[0]
+        capacity_col = capacity_candidates[0]
+        
+        # Create simplified mapping
+        simplified_records = []
+        for _, row in df.iterrows():
+            facility_name = str(row[facility_col]).strip()
+            capacity = pd.to_numeric(row[capacity_col], errors='coerce')
+            
+            if pd.notna(capacity) and capacity > 0:
+                # Try to match to dashboard facilities
+                dashboard_facility = map_facility_code_to_dashboard_name('', facility_name)
+                
+                if dashboard_facility:
+                    simplified_records.append({
+                        'dashboard_facility': dashboard_facility,
+                        'facility_code': '',
+                        'facility_name': facility_name,
+                        'capacity_tj_day': capacity,
+                        'capacity_type': 'CSV_IMPORT',
+                        'description': 'Alternative CSV Processing',
+                        'effective_date': '2024-01-01'
+                    })
+        
+        if simplified_records:
+            st.success(f"✅ Alternative processing found {len(simplified_records)} facilities")
+            return pd.DataFrame(simplified_records)
+    
+    st.warning("⚠️ Could not process CSV in any known format")
+    return pd.DataFrame()
 
 def process_medium_term_capacity_json(api_data):
     """Process JSON response from Medium Term Capacity API"""
@@ -535,7 +757,7 @@ def fetch_real_production_facility_data_with_capacity_api():
     """Enhanced production data with real Medium Term Capacity constraints"""
     
     # First, get real capacity data
-    capacity_df, capacity_error = fetch_medium_term_capacity_data()
+    capacity_df, capacity_error = fetch_medium_term_capacity_data_csv_first()
     
     # Update facility configurations with real capacity data
     if capacity_df is not None and not capacity_df.empty:
@@ -1180,7 +1402,7 @@ def display_enhanced_command_center():
     with st.spinner("🔄 Loading comprehensive market data from multiple sources..."):
         production_df, prod_error = fetch_real_production_facility_data_with_capacity_api()
         demand_df, demand_error = fetch_real_market_demand_data_enhanced()
-        capacity_df, capacity_error = fetch_medium_term_capacity_data()
+        capacity_df, capacity_error = fetch_medium_term_capacity_data_csv_first()
         news_items = fetch_real_news_feed_enhanced()
     
     # Enhanced API Status Summary
@@ -1310,7 +1532,7 @@ def display_enhanced_command_center():
     with col1:
         # Enhanced Supply & Demand Chart with Real Data
         st.markdown("### 📊 WA Gas Supply by Production Facility vs Market Demand")
-        st.markdown("*Enhanced with Medium Term Capacity API constraints*")
+        st.markdown("*Enhanced with Medium Term Capacity API constraints (CSV-first approach)*")
         
         # Chart controls
         control_col1, control_col2, control_col3 = st.columns(3)
@@ -1475,7 +1697,7 @@ def display_enhanced_command_center():
                             with col_c:
                                 st.metric("Spare Capacity", f"{total_capacity - total_current:.0f} TJ/day")
                             with col_d:
-                                st.metric("API Updated Facilities", f"{api_updated_facilities}/{len(selected_facilities)}")
+                                st.metric("CSV/API Updated Facilities", f"{api_updated_facilities}/{len(selected_facilities)}")
                             
                             # Market context with enhanced insights
                             st.markdown(f"""
@@ -1484,11 +1706,12 @@ def display_enhanced_command_center():
                             - **Selected Facilities Cover:** {(total_current / current_demand * 100) if current_demand > 0 else 0:.1f}% of demand
                             - **Overall System Utilization:** {(total_current / total_capacity * 100) if total_capacity > 0 else 0:.1f}%
                             - **Market Balance:** {'✅ Adequate Supply' if total_current >= current_demand else '⚠️ Tight Supply'}
-                            - **Capacity Data Quality:** {api_updated_facilities} facilities with real-time API capacity, {len(selected_facilities) - api_updated_facilities} with GSOO 2024 estimates
+                            - **Capacity Data Quality:** {api_updated_facilities} facilities with CSV/API capacity, {len(selected_facilities) - api_updated_facilities} with GSOO 2024 estimates
                             
                             **🔍 Data Provenance:**
                             - *Production Data: {getattr(production_df, 'attrs', {}).get('source', 'Unknown')}*
                             - *Capacity Data: {getattr(production_df, 'attrs', {}).get('capacity_source', 'GSOO 2024')}*
+                            - *CSV Processing: Enhanced format detection with alternative parsing*
                             - *Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M AWST')}*
                             """)
             else:
@@ -1503,7 +1726,8 @@ def display_enhanced_command_center():
                         'Facility': facility,
                         'Capacity (TJ/day)': config.get('max_domestic_capacity', 0),
                         'Status': config.get('status', 'Unknown').title(),
-                        'Region': config.get('region', 'Unknown')
+                        'Region': config.get('region', 'Unknown'),
+                        'Capacity Source': config.get('capacity_source', 'GSOO 2024')
                     })
                 
                 summary_df = pd.DataFrame(summary_data)
@@ -1578,15 +1802,16 @@ def display_enhanced_facility_capacity_analysis():
     """Comprehensive facility capacity analysis with real API data"""
     
     st.markdown("### 🏭 WA Production Facilities - Comprehensive Capacity Analysis")
+    st.markdown("*Enhanced with CSV-first Medium Term Capacity API integration*")
     
-    # Fetch real capacity data
-    capacity_df, capacity_error = fetch_medium_term_capacity_data()
+    # Fetch real capacity data using CSV-first approach
+    capacity_df, capacity_error = fetch_medium_term_capacity_data_csv_first()
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
         if capacity_df is not None and not capacity_df.empty:
-            st.markdown("#### 📊 Current Medium Term Capacity (Live API Data)")
+            st.markdown("#### 📊 Current Medium Term Capacity (Live CSV/API Data)")
             
             # Enhanced capacity display table
             display_capacity_df = capacity_df.copy()
@@ -1605,11 +1830,11 @@ def display_enhanced_facility_capacity_analysis():
             
             # Data source information with enhanced details
             st.markdown(f"""
-            **📡 Data Source:** Medium Term Capacity Outlook API  
+            **📡 Data Source:** Medium Term Capacity Outlook (CSV-First API)  
             **Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M AWST')}  
             **API Status:** {'✅ Connected' if capacity_error is None else '❌ Using Fallback'}  
             **Facilities Mapped:** {len(capacity_df)} of {len(WA_PRODUCTION_FACILITIES)} dashboard facilities  
-            **Report ID:** {capacity_df.iloc[0].get('report_id', 'N/A') if not capacity_df.empty else 'N/A'}
+            **Processing Method:** Enhanced CSV parsing with alternative format detection
             """)
             
         else:
@@ -1670,9 +1895,21 @@ def display_enhanced_facility_capacity_analysis():
             values=list(region_capacity.values()),
             names=list(region_capacity.keys()),
             title='Capacity by Region',
-            height=300
+            height=300,
+            color_discrete_sequence=['#3b82f6', '#10b981', '#f59e0b', '#ef4444']
         )
+        fig_region.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig_region, use_container_width=True)
+        
+        # CSV Processing Status
+        st.markdown("#### 🔄 CSV Processing Status")
+        csv_status = "✅ Enhanced" if capacity_error is None else "⚠️ Fallback"
+        st.markdown(f"**CSV Parser:** {csv_status}")
+        st.markdown("**Features:**")
+        st.markdown("- Flexible column mapping")
+        st.markdown("- Alternative format detection")
+        st.markdown("- Fuzzy facility name matching")
+        st.markdown("- Multiple endpoint attempts")
 
 # ==============================================================================
 # MAIN APPLICATION WITH ENHANCED NAVIGATION
@@ -1684,7 +1921,7 @@ def main():
     # Enhanced sidebar with comprehensive data monitoring
     with st.sidebar:
         st.markdown("## 📡 WA Gas Market Dashboard")
-        st.markdown("*Professional Real-Time Analytics*")
+        st.markdown("*Professional Real-Time Analytics with CSV-First API*")
         
         # Comprehensive data source health check
         availability = check_data_source_availability()
@@ -1697,7 +1934,7 @@ def main():
         st.markdown(f"### {health_color} System Health: {health_percentage:.0f}%")
         st.progress(health_percentage / 100)
         
-               # Enhanced navigation with detailed descriptions
+        # Enhanced navigation with detailed descriptions
         selected_module = st.radio(
             "Dashboard Modules:",
             [
@@ -1710,7 +1947,7 @@ def main():
                 "🧮 Advanced Analytics"
             ],
             index=0,
-            help="Select a module to explore different aspects of the WA gas market"
+            help="Select a module to explore different aspects of the WA gas market with enhanced CSV-first data integration"
         )
         
         st.markdown("---")
@@ -1719,7 +1956,7 @@ def main():
         st.markdown("### 📊 Data Source Status")
         
         source_status = {
-            "Medium Term Capacity API": availability.get('Medium_Term_Capacity', False),
+            "Medium Term Capacity (CSV)": availability.get('Medium_Term_Capacity', False),
             "AEMO GBB API": availability.get('AEMO_GBB_API', False),
             "Public Dashboard": availability.get('AEMO_Public_Dashboard', False),
             "WA Gov Portal": availability.get('WA_Gov_Data', False),
@@ -1755,7 +1992,7 @@ def main():
             st.markdown(f"**{status_icon} {status.title()}:** {count} facilities")
         
         st.markdown(f"**Total System Capacity:** {total_capacity:,} TJ/day")
-        st.markdown(f"**API Updated Facilities:** {api_updated_count}/{len(WA_PRODUCTION_FACILITIES)}")
+        st.markdown(f"**CSV/API Updated Facilities:** {api_updated_count}/{len(WA_PRODUCTION_FACILITIES)}")
         
         st.markdown("---")
         
@@ -1774,13 +2011,13 @@ def main():
                 for source, status in new_availability.items():
                     st.write(f"{'✅' if status else '❌'} {source.replace('_', ' ')}")
         
-        if st.button("🏭 Test Capacity API"):
-            with st.spinner("Testing Medium Term Capacity API..."):
-                capacity_df, error = fetch_medium_term_capacity_data()
+        if st.button("🏭 Test CSV Capacity API"):
+            with st.spinner("Testing Medium Term Capacity API (CSV-first)..."):
+                capacity_df, error = fetch_medium_term_capacity_data_csv_first()
                 if error is None:
-                    st.success(f"✅ API Connected - {len(capacity_df)} facilities loaded")
+                    st.success(f"✅ CSV/API Connected - {len(capacity_df)} facilities loaded")
                 else:
-                    st.error(f"❌ API Error: {error}")
+                    st.error(f"❌ CSV/API Error: {error}")
         
         # Performance metrics
         st.markdown("---")
@@ -1788,21 +2025,24 @@ def main():
         st.markdown(f"**Cache TTL:** 30 min (production), 60 min (capacity)")
         st.markdown(f"**Last System Check:** {datetime.now().strftime('%H:%M:%S')}")
         st.markdown(f"**Active Sources:** {active_sources}/{total_sources}")
+        st.markdown(f"**CSV Processing:** Enhanced format detection")
         
         st.markdown("---")
         st.markdown("""
-        ### 📋 Data Sources
-        - **🔌 AEMO Medium Term Capacity API**
+        ### 📋 Enhanced Data Sources
+        - **🔌 AEMO Medium Term Capacity (CSV-First)**
         - **📊 AEMO WA Gas Bulletin Board**
         - **🏛️ WA Gas Statement of Opportunities 2024**
         - **📰 Real-time RSS News Feeds**
         - **💹 Live Market Intelligence**
+        - **🔄 Enhanced CSV Processing**
         """)
         
         # Footer with version info
         st.markdown("---")
         st.markdown("**Enhanced Dashboard v2.1**")
         st.markdown("*Professional WA Gas Market Analytics*")
+        st.markdown("*CSV-First API Integration*")
         st.markdown(f"*Built: {datetime.now().strftime('%Y-%m-%d')}*")
     
     # Route to enhanced modules with comprehensive error handling
@@ -1824,12 +2064,14 @@ def main():
                 st.markdown("- AEMO storage levels")
                 st.markdown("- Seasonal comparisons")
                 st.markdown("- 5-year historical context")
+                st.markdown("- CSV data integration")
             
             with col2:
                 st.markdown("#### Supply/Demand Balance")
                 st.markdown("- Real-time adequacy ratios")
                 st.markdown("- Seasonal demand patterns")
                 st.markdown("- Capacity utilization analysis")
+                st.markdown("- Enhanced CSV processing")
             
         elif selected_module == "📈 Market Structure":
             st.markdown("### 📈 Enhanced Market Structure")
@@ -1891,6 +2133,15 @@ def main():
     except Exception as e:
         st.error(f"❌ Module Error: {e}")
         st.markdown("Please try refreshing the page or selecting a different module.")
+        
+        # Enhanced error reporting
+        with st.expander("🔍 Error Details", expanded=False):
+            st.code(str(e))
+            st.markdown("**Troubleshooting Steps:**")
+            st.markdown("1. Click 'Refresh All Data' in the sidebar")
+            st.markdown("2. Check data source status")
+            st.markdown("3. Try a different module")
+            st.markdown("4. Contact support if error persists")
 
 if __name__ == "__main__":
     main()
