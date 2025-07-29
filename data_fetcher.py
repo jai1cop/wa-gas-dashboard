@@ -3,21 +3,23 @@ import requests
 import pandas as pd
 from datetime import datetime
 
-# Base URL for AEMO Gas Bulletin Board reports
-GBB_BASE = "https://nemweb.com.au/Reports/Current/GBB/"
+# Base URL for AEMO Gas Bulletin Board WA reports
+GBB_WA_BASE = "https://gbbwa.aemo.com.au/data/"
 
+# CSV filenames for key WA datasets
 FILES = {
-    "flows": "GasBBActualFlowStorageLast31.CSV",
-    "mto_future": "GasBBMediumTermCapacityOutlookFuture.csv",
-    "nameplate": "GasBBNameplateRatingCurrent.csv",
+    "flows": "ActualFlowStorage.csv",
+    "nameplate": "NameplateRating.csv", 
+    "mto_future": "MediumTermCapacityOutlook.csv",
 }
 
+# Local cache directory for downloads
 CACHE_DIR = "data_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 def _download(fname):
     try:
-        url = GBB_BASE + fname
+        url = GBB_WA_BASE + fname
         response = requests.get(url, timeout=40)
         response.raise_for_status()
 
@@ -60,57 +62,81 @@ def fetch_csv(key, force=False):
         return pd.DataFrame()
 
 def clean_nameplate(df):
-    """Extract ALL facilities from nameplate data"""
-    print(f"[DEBUG] Nameplate input: {df.shape}")
+    """Extract facilities from WA nameplate data"""
+    print(f"[DEBUG] WA Nameplate input: {df.shape}")
     
-    if df.empty or 'capacityquantity' not in df.columns:
+    if df.empty:
         return pd.DataFrame(columns=["FacilityName", "TJ_Nameplate"])
     
-    result = df[['facilityname', 'capacityquantity']].copy()
+    # Look for capacity columns in WA data structure
+    capacity_col = None
+    for col in ['nameplaterating', 'capacityquantity', 'capacity', 'rating']:
+        if col in df.columns:
+            capacity_col = col
+            break
+    
+    if capacity_col is None or 'facilityname' not in df.columns:
+        print(f"[WARNING] Required columns not found in WA nameplate data")
+        print(f"Available columns: {list(df.columns)}")
+        return pd.DataFrame(columns=["FacilityName", "TJ_Nameplate"])
+    
+    result = df[['facilityname', capacity_col]].copy()
     result.rename(columns={
         'facilityname': 'FacilityName',
-        'capacityquantity': 'TJ_Nameplate'
+        capacity_col: 'TJ_Nameplate'
     }, inplace=True)
     
     result = result.dropna()
-    print(f"[DEBUG] Nameplate output: {result.shape} facilities")
+    print(f"[DEBUG] WA Nameplate output: {result.shape} facilities")
     return result
 
 def clean_mto(df):
-    """Extract ALL facilities from MTO data and aggregate duplicates"""
-    print(f"[DEBUG] MTO input: {df.shape}")
+    """Extract facilities from WA MTO data"""
+    print(f"[DEBUG] WA MTO input: {df.shape}")
     
     if df.empty:
         return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available"])
     
-    required_cols = ['facilityname', 'fromgasdate', 'outlookquantity']
-    missing = [col for col in required_cols if col not in df.columns]
-    if missing:
-        print(f"[WARNING] Missing MTO columns: {missing}")
+    # Look for required columns in WA MTO structure
+    date_col = None
+    for col in ['gasday', 'fromgasday', 'gasdate', 'date']:
+        if col in df.columns:
+            date_col = col
+            break
+    
+    capacity_col = None
+    for col in ['capacity', 'availablecapacity', 'outlookquantity', 'quantity']:
+        if col in df.columns:
+            capacity_col = col
+            break
+    
+    if not all([date_col, capacity_col, 'facilityname' in df.columns]):
+        print(f"[WARNING] Required columns not found in WA MTO data")
+        print(f"Available columns: {list(df.columns)}")
         return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available"])
 
-    df['fromgasdate'] = pd.to_datetime(df['fromgasdate'], errors="coerce")
-    result = df[['facilityname', 'fromgasdate', 'outlookquantity']].copy()
-    result = result.dropna(subset=['fromgasdate'])
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    result = df[['facilityname', date_col, capacity_col]].copy()
+    result = result.dropna(subset=[date_col])
     
     result.rename(columns={
         'facilityname': 'FacilityName',
-        'fromgasdate': 'GasDay',
-        'outlookquantity': 'TJ_Available'
+        date_col: 'GasDay',
+        capacity_col: 'TJ_Available'
     }, inplace=True)
     
-    # Aggregate duplicates by summing capacity for same facility-date
+    # Aggregate duplicates
     result = result.groupby(['FacilityName', 'GasDay'])['TJ_Available'].sum().reset_index()
     
-    print(f"[DEBUG] MTO output: {result.shape} records (after deduplication)")
+    print(f"[DEBUG] WA MTO output: {result.shape} records")
     return result
 
 def build_supply_profile():
-    """Build supply profile using ALL facilities"""
+    """Build WA supply profile"""
     nameplate = clean_nameplate(fetch_csv("nameplate"))
     mto = clean_mto(fetch_csv("mto_future"))
 
-    print(f"[DEBUG] Supply building - Nameplate: {nameplate.shape}, MTO: {mto.shape}")
+    print(f"[DEBUG] WA Supply building - Nameplate: {nameplate.shape}, MTO: {mto.shape}")
 
     if nameplate.empty and mto.empty:
         return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available", "TJ_Nameplate"])
@@ -138,101 +164,101 @@ def build_supply_profile():
     supply = mto.merge(nameplate, on="FacilityName", how="left")
     supply["TJ_Available"] = supply["TJ_Available"].fillna(supply["TJ_Nameplate"])
     
-    print(f"[DEBUG] Final supply profile: {supply.shape}")
+    print(f"[DEBUG] WA Final supply profile: {supply.shape}")
     return supply
 
 def build_demand_profile():
-    """Build demand profile with proper filtering for realistic WA demand levels"""
+    """Build WA demand profile from flows data"""
     flows = fetch_csv("flows")
-    print(f"[DEBUG] Demand building from flows: {flows.shape}")
+    print(f"[DEBUG] WA Demand building from flows: {flows.shape}")
     
-    if flows.empty or 'gasdate' not in flows.columns or 'demand' not in flows.columns:
+    if flows.empty:
         return pd.DataFrame(columns=["GasDay", "TJ_Demand"])
 
-    flows['gasdate'] = pd.to_datetime(flows['gasdate'], errors="coerce")
-    flows = flows.dropna(subset=['gasdate'])
+    # Look for date and demand columns in WA flows structure
+    date_col = None
+    for col in ['gasday', 'gasdate', 'date']:
+        if col in flows.columns:
+            date_col = col
+            break
     
-    # CRITICAL FIX: Filter for positive demand only and scale to realistic levels
-    demand_flows = flows[flows['demand'] > 0].copy()
+    demand_col = None
+    for col in ['demand', 'consumption', 'usage', 'flow']:
+        if col in flows.columns:
+            demand_col = col
+            break
     
-    # Debug: Show what we're aggregating
-    print(f"[DEBUG] Positive demand records: {len(demand_flows)} out of {len(flows)}")
-    if 'facilitytype' in demand_flows.columns:
-        facility_types = demand_flows['facilitytype'].value_counts()
-        print(f"[DEBUG] Demand facility types: {facility_types.to_dict()}")
+    if not all([date_col, demand_col]):
+        print(f"[WARNING] Required columns not found in WA flows data")
+        print(f"Available columns: {list(flows.columns)}")
+        return pd.DataFrame(columns=["GasDay", "TJ_Demand"])
+
+    flows[date_col] = pd.to_datetime(flows[date_col], errors="coerce")
+    flows = flows.dropna(subset=[date_col])
     
-    # Aggregate demand by date
-    demand = demand_flows.groupby('gasdate')['demand'].sum().reset_index()
+    # Filter for positive demand only
+    demand_flows = flows[flows[demand_col] > 0].copy()
     
-    # SCALING FIX: The raw data includes supply, storage, and transmission flows
-    # Scale down to realistic WA end-user demand levels (1,000-1,500 TJ/day)
-    demand['demand'] = demand['demand'] / 6.0  # Scaling factor based on debug analysis
+    print(f"[DEBUG] WA Positive demand records: {len(demand_flows)} out of {len(flows)}")
     
-    demand.rename(columns={'gasdate': 'GasDay', 'demand': 'TJ_Demand'}, inplace=True)
+    # Aggregate demand by date (WA data should already be WA-specific)
+    demand = demand_flows.groupby(date_col)[demand_col].sum().reset_index()
+    demand.rename(columns={date_col: 'GasDay', demand_col: 'TJ_Demand'}, inplace=True)
     
-    print(f"[DEBUG] Demand profile: {demand.shape}, avg daily: {demand['TJ_Demand'].mean():.1f} TJ (after scaling)")
+    print(f"[DEBUG] WA Demand profile: {demand.shape}, avg daily: {demand['TJ_Demand'].mean():.1f} TJ")
     return demand
 
 def get_model():
-    """Main function with improved date range handling"""
+    """Main function for WA gas market model"""
     sup = build_supply_profile()
     dem = build_demand_profile()
 
-    print(f"[DEBUG] get_model - Supply: {sup.shape}, Demand: {dem.shape}")
+    print(f"[DEBUG] WA get_model - Supply: {sup.shape}, Demand: {dem.shape}")
 
     if dem.empty:
         return sup, dem
 
     if sup.empty:
-        print("[WARNING] No supply data - creating zero supply model")
+        print("[WARNING] No WA supply data - creating zero supply model")
         dem['TJ_Available'] = 0
         dem['Shortfall'] = dem['TJ_Available'] - dem['TJ_Demand']
         return sup, dem
 
-    # Debug date ranges
-    print(f"[DEBUG] Supply dates: {sup['GasDay'].min()} to {sup['GasDay'].max()}")
-    print(f"[DEBUG] Demand dates: {dem['GasDay'].min()} to {dem['GasDay'].max()}")
+    print(f"[DEBUG] WA Supply dates: {sup['GasDay'].min()} to {sup['GasDay'].max()}")
+    print(f"[DEBUG] WA Demand dates: {dem['GasDay'].min()} to {dem['GasDay'].max()}")
 
-    # Get demand date range to focus supply data
+    # Get demand date range
     demand_start = dem['GasDay'].min()
     demand_end = dem['GasDay'].max()
     
-    # Filter supply to demand date range PLUS extend to cover gaps
-    extended_start = demand_start - pd.Timedelta(days=7)  # Look back 7 days
-    extended_end = demand_end + pd.Timedelta(days=365)    # Look forward 1 year
+    # Filter supply to demand date range
+    extended_start = demand_start - pd.Timedelta(days=7)
+    extended_end = demand_end + pd.Timedelta(days=365)
     
     relevant_supply = sup[
         (sup['GasDay'] >= extended_start) & 
         (sup['GasDay'] <= extended_end)
     ]
     
-    print(f"[DEBUG] Filtered supply to relevant dates: {relevant_supply.shape}")
+    print(f"[DEBUG] WA Filtered supply: {relevant_supply.shape}")
     
     if relevant_supply.empty:
-        print("[WARNING] No supply data in demand date range - using latest available supply")
-        # Use the most recent supply data available
+        # Use latest available supply
         latest_supply_date = sup['GasDay'].max()
         latest_supply = sup[sup['GasDay'] == latest_supply_date]
-        
-        # Apply latest supply to all demand dates
         supply_total = latest_supply['TJ_Available'].sum()
         dem['TJ_Available'] = supply_total
         dem['Shortfall'] = dem['TJ_Available'] - dem['TJ_Demand']
-        
-        print(f"[DEBUG] Used latest supply {supply_total} TJ for all demand dates")
         return sup, dem
 
-    # Aggregate daily supply from filtered data
+    # Aggregate daily supply
     total_supply = relevant_supply.groupby("GasDay")["TJ_Available"].sum().reset_index()
-    print(f"[DEBUG] Daily supply aggregation: {total_supply.shape}, max: {total_supply['TJ_Available'].max()}")
     
-    # Forward-fill supply data to cover gaps
-    # Create complete date range for demand period
+    # Create complete date range and forward-fill
     all_dates = pd.DataFrame({
         'GasDay': pd.date_range(demand_start, demand_end, freq='D')
     })
     
-    # Merge and forward-fill supply
     supply_filled = all_dates.merge(total_supply, on='GasDay', how='left')
     supply_filled['TJ_Available'] = supply_filled['TJ_Available'].fillna(method='ffill')
     supply_filled['TJ_Available'] = supply_filled['TJ_Available'].fillna(method='bfill')
@@ -243,5 +269,5 @@ def get_model():
     model['TJ_Available'] = model['TJ_Available'].fillna(0)
     model["Shortfall"] = model["TJ_Available"] - model["TJ_Demand"]
     
-    print(f"[DEBUG] Final model: {model.shape}, avg supply: {model['TJ_Available'].mean():.1f}, avg demand: {model['TJ_Demand'].mean():.1f}")
+    print(f"[DEBUG] WA Final model: {model.shape}, avg supply: {model['TJ_Available'].mean():.1f}, avg demand: {model['TJ_Demand'].mean():.1f}")
     return sup, model
