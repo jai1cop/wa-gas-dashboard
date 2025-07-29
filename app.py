@@ -9,6 +9,13 @@ import requests
 import json
 from io import StringIO
 import time
+import traceback
+try:
+    # Your chart creation code
+    fig = create_integrated_supply_demand_chart(...)
+except Exception as e:
+    st.error(f"Chart error: {e}")
+    st.code(traceback.format_exc())
 
 # Handle optional dependencies gracefully
 try:
