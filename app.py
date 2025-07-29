@@ -7,32 +7,59 @@ from datetime import date
 st.set_page_config("WA Gas Dashboard", layout="wide")
 st.title("WA Gas Supply & Demand Dashboard")
 
-# Load real AEMO data
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+# Load real AEMO data with bulletproof error handling
+@st.cache_data(ttl=3600)
 def load_real_data():
     try:
-        return dfc.get_model()
+        result = dfc.get_model()
+        # Multiple checks to ensure we always return a tuple
+        if result is None:
+            return pd.DataFrame(), pd.DataFrame()
+        if not isinstance(result, tuple):
+            return pd.DataFrame(), pd.DataFrame()
+        if len(result) != 2:
+            return pd.DataFrame(), pd.DataFrame()
+        return result
     except Exception as e:
-        st.error(f"Error loading AEMO data: {e}")
+        print(f"[ERROR] load_real_data failed: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 # Sidebar controls
 st.sidebar.header("Scenario Controls")
 
-# Yara consumption slider
+# Yara consumption slider with unique key to fix duplicate ID error
 yara_val = st.sidebar.slider(
     "Yara Pilbara Fertilisers gas consumption (TJ/day)",
     min_value=0, max_value=100, value=80, step=5,
-    help="Adjust Yara's gas consumption to see market impact"
+    help="Adjust Yara's gas consumption to see market impact",
+    key="yara_consumption_slider"  # CRITICAL: Add unique key
 )
 
 # Manual refresh button
-if st.sidebar.button("Refresh AEMO Data"):
+if st.sidebar.button("Refresh AEMO Data", key="refresh_button"):
     st.cache_data.clear()
     st.sidebar.success("Data refreshed!")
 
-# Load data
-sup, model = load_real_data()
+# Load data with multiple layers of protection
+sup = pd.DataFrame()
+model = pd.DataFrame()
+
+try:
+    result = load_real_data()
+    if result is not None and isinstance(result, tuple) and len(result) == 2:
+        sup, model = result
+    else:
+        st.error("Data loading returned invalid format")
+        sup, model = pd.DataFrame(), pd.DataFrame()
+except Exception as e:
+    st.error(f"Critical error loading data: {e}")
+    sup, model = pd.DataFrame(), pd.DataFrame()
+
+# Ensure DataFrames are valid
+if not isinstance(sup, pd.DataFrame):
+    sup = pd.DataFrame()
+if not isinstance(model, pd.DataFrame):
+    model = pd.DataFrame()
 
 # COMPREHENSIVE DEBUG SECTION
 st.sidebar.write("**📊 Debug Information:**")
@@ -42,16 +69,19 @@ st.sidebar.write(f"Model DataFrame shape: {model.shape}")
 # Supply Debug
 if not sup.empty:
     st.sidebar.write("**Supply Analysis:**")
-    st.sidebar.write(f"Supply date range: {sup['GasDay'].min()} to {sup['GasDay'].max()}")
-    st.sidebar.write(f"Unique facilities: {sup['FacilityName'].nunique()}")
-    st.sidebar.write(f"Total TJ_Available sum: {sup['TJ_Available'].sum():.2f}")
-    duplicates = sup.groupby(['GasDay', 'FacilityName']).size()
-    duplicate_count = len(duplicates[duplicates > 1])
-    st.sidebar.write(f"Duplicate facility-date entries: {duplicate_count}")
+    if 'GasDay' in sup.columns:
+        st.sidebar.write(f"Supply date range: {sup['GasDay'].min()} to {sup['GasDay'].max()}")
+    if 'FacilityName' in sup.columns:
+        st.sidebar.write(f"Unique facilities: {sup['FacilityName'].nunique()}")
+    if 'TJ_Available' in sup.columns:
+        st.sidebar.write(f"Total TJ_Available sum: {sup['TJ_Available'].sum():.2f}")
+        duplicates = sup.groupby(['GasDay', 'FacilityName']).size()
+        duplicate_count = len(duplicates[duplicates > 1])
+        st.sidebar.write(f"Duplicate facility-date entries: {duplicate_count}")
 else:
     st.sidebar.error("❌ Supply DataFrame is EMPTY")
 
-# DEMAND ANALYSIS DEBUG - NEW SECTION
+# DEMAND ANALYSIS DEBUG
 st.sidebar.write("**📈 Demand Analysis Debug:**")
 if not model.empty and 'TJ_Demand' in model.columns:
     demand_stats = model['TJ_Demand'].describe()
@@ -66,7 +96,6 @@ if not model.empty and 'TJ_Demand' in model.columns:
     st.sidebar.write(f"Maximum daily demand: {max_demand:.1f} TJ/day")
     st.sidebar.write(f"Minimum daily demand: {min_demand:.1f} TJ/day")
     
-    # Typical WA gas demand is around 1,000-1,500 TJ/day
     if avg_demand > 2000:
         st.sidebar.warning("⚠️ Demand seems high - typical WA demand is 1,000-1,500 TJ/day")
     elif avg_demand < 500:
@@ -81,18 +110,15 @@ try:
         st.sidebar.write("**Raw Flows Demand Debug:**")
         st.sidebar.write(f"Total raw demand records: {len(flows_raw)}")
         
-        # Check for negative values
         negative_demand = flows_raw[flows_raw['demand'] < 0]
         st.sidebar.write(f"Negative demand records: {len(negative_demand)}")
         
-        # Check demand by facility type
         if 'facilitytype' in flows_raw.columns:
             demand_by_type = flows_raw.groupby('facilitytype')['demand'].sum().sort_values(ascending=False)
             st.sidebar.write("**Demand by facility type:**")
             st.sidebar.dataframe(demand_by_type.head())
         
-        # Check for unusually high individual records
-        high_demand = flows_raw[flows_raw['demand'] > 1000]  # Over 1000 TJ in single record
+        high_demand = flows_raw[flows_raw['demand'] > 1000]
         st.sidebar.write(f"Records with >1000 TJ demand: {len(high_demand)}")
         
         if len(high_demand) > 0:
@@ -105,7 +131,8 @@ except Exception as e:
 # Model Debug
 if not model.empty:
     st.sidebar.write("**Model Analysis:**")
-    st.sidebar.write(f"Model date range: {model['GasDay'].min()} to {model['GasDay'].max()}")
+    if 'GasDay' in model.columns:
+        st.sidebar.write(f"Model date range: {model['GasDay'].min()} to {model['GasDay'].max()}")
     if 'TJ_Available' in model.columns:
         total_supply = model['TJ_Available'].sum()
         st.sidebar.write(f"Total supply across all days: {total_supply:.2f} TJ")
@@ -113,9 +140,8 @@ if not model.empty:
 # MAIN DASHBOARD LOGIC
 if model.empty:
     st.error("No data available - using sample data")
-    # Sample data fallback
     sample_data = {
-        'Date': pd.date_range('2025-07-28', periods=30),
+        'Date': pd.date_range('2025-07-29', periods=30),
         'Supply': [1800 + i*5 for i in range(30)],
         'Demand': [1600 + i*3 for i in range(30)]
     }
@@ -143,13 +169,10 @@ else:
     model_adj["TJ_Demand"] = model_adj["TJ_Demand"] + (yara_val - 80)
     model_adj["Shortfall"] = model_adj["TJ_Available"] - model_adj["TJ_Demand"]
     
-    # Supply stack chart with duplicate handling
+    # Supply stack chart
     if not sup.empty and all(col in sup.columns for col in ['TJ_Available', 'FacilityName', 'GasDay']):
         try:
-            # Aggregate duplicate facility-date combinations
             sup_agg = sup.groupby(['GasDay', 'FacilityName'])['TJ_Available'].sum().reset_index()
-            
-            # Pivot for stacked area chart
             stack = sup_agg.pivot(index="GasDay", columns="FacilityName", values="TJ_Available")
             today_dt = pd.to_datetime(date.today())
             stack = stack.loc[stack.index >= today_dt]
@@ -160,12 +183,10 @@ else:
                               title="WA Gas Supply by Facility (Stacked)")
                 fig1.update_traces(hovertemplate="%{y:.0f} TJ<br>%{x|%d-%b-%Y}")
                 
-                # Add demand line
                 fig1.add_scatter(x=model_adj["GasDay"], y=model_adj["TJ_Demand"],
                                mode="lines", name="Historical / Forecast Demand",
                                line=dict(color="black", width=3))
                 
-                # Add shortfall markers
                 shortfalls = model_adj[model_adj["Shortfall"] < 0]
                 if not shortfalls.empty:
                     fig1.add_scatter(x=shortfalls["GasDay"], y=shortfalls["TJ_Demand"],
@@ -180,7 +201,7 @@ else:
     else:
         st.error("❌ Supply data missing required columns for stacked chart")
     
-    # Supply-demand balance bar chart
+    # Balance bar chart
     try:
         fig2 = px.bar(model_adj, x="GasDay", y="Shortfall",
                       color=model_adj["Shortfall"] >= 0,
@@ -190,7 +211,6 @@ else:
         fig2.update_layout(showlegend=False)
         st.plotly_chart(fig2, use_container_width=True)
         
-        # Show balance statistics
         avg_shortfall = model_adj['Shortfall'].mean()
         if avg_shortfall < 0:
             st.warning(f"⚠️ Average daily shortfall: {abs(avg_shortfall):.1f} TJ/day")
@@ -209,7 +229,6 @@ else:
         if available_cols:
             display_df = model_adj[available_cols].copy()
             
-            # Rename for display
             rename_map = {
                 "GasDay": "Date",
                 "TJ_Available": "Available Supply (TJ)",
@@ -220,7 +239,6 @@ else:
             
             st.dataframe(display_df, use_container_width=True)
             
-            # Show summary statistics
             if 'Available Supply (TJ)' in display_df.columns and 'Demand (TJ)' in display_df.columns:
                 avg_supply = display_df['Available Supply (TJ)'].mean()
                 avg_demand = display_df['Demand (TJ)'].mean()
@@ -238,5 +256,4 @@ st.sidebar.write(f"Dashboard loaded: {'✅' if not model.empty else '❌'}")
 st.sidebar.write(f"Supply data: {'✅' if not sup.empty else '❌'}")
 st.sidebar.write(f"Demand data: {'✅' if not model.empty and 'TJ_Demand' in model.columns else '❌'}")
 
-# Streamlit Cloud logs reminder
 st.sidebar.info("💡 **Tip:** Check Streamlit Cloud logs (Manage app → Logs) for detailed [DEBUG] messages from data_fetcher.py")
