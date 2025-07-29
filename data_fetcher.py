@@ -181,7 +181,7 @@ def build_supply_profile():
     return supply
 
 def build_demand_profile():
-    """Build WA-only demand profile from national flows data"""
+    """Build WA-only demand profile with relaxed filtering"""
     flows = fetch_csv("flows")
     print(f"[DEBUG] National flows input: {flows.shape}")
     
@@ -191,53 +191,70 @@ def build_demand_profile():
     flows['gasdate'] = pd.to_datetime(flows['gasdate'], errors="coerce")
     flows = flows.dropna(subset=['gasdate'])
     
-    # CRITICAL: Filter for WA-only data
+    # RELAXED WA FILTERING - Less restrictive approach
     wa_flows = flows.copy()
     
-    if 'state' in flows.columns:
-        wa_flows = flows[flows['state'].isin(['WA', 'wa', 'Western Australia'])]
-        print(f"[DEBUG] WA flows after state filter: {wa_flows.shape}")
-    elif 'locationname' in flows.columns:
-        # Filter by WA location names
-        wa_locations = flows[flows['locationname'].str.contains(
-            'WA|Western|Perth|Karratha|Dampier|Varanus|Macedon|Wheatstone|Gorgon|whole wa', 
-            case=False, na=False
-        )]
-        wa_flows = wa_locations
-        print(f"[DEBUG] WA flows after location filter: {wa_flows.shape}")
-    elif 'facilityname' in flows.columns:
-        # Filter by known WA facility names
-        wa_facilities = flows[flows['facilityname'].str.contains(
-            'Karratha|Varanus|Macedon|Wheatstone|Gorgon|NWS|North West Shelf|Dampier|Mondarra|Tubridgi|Devil Creek|WA|Western', 
-            case=False, na=False
-        )]
-        wa_flows = wa_facilities
-        print(f"[DEBUG] WA flows after facility filter: {wa_flows.shape}")
-    else:
-        print("[WARNING] No WA filtering columns found - using proportional estimate")
-        # Assume WA is ~15% of national demand as fallback
-        wa_flows = flows.copy()
+    # Try multiple filtering approaches in order of preference
+    if 'locationname' in flows.columns:
+        # First try: Look for "whole wa" specifically
+        whole_wa = flows[flows['locationname'].str.contains('whole wa', case=False, na=False)]
+        if not whole_wa.empty:
+            wa_flows = whole_wa
+            print(f"[DEBUG] Found 'whole wa' location data: {wa_flows.shape}")
+        else:
+            # Second try: Broader WA location filtering
+            wa_locations = flows[flows['locationname'].str.contains(
+                'WA|Western Australia|wa', case=False, na=False
+            )]
+            if not wa_locations.empty:
+                wa_flows = wa_locations
+                print(f"[DEBUG] WA flows after location filter: {wa_flows.shape}")
+            else:
+                print("[DEBUG] No WA locations found, using proportional estimate")
     
-    # Filter for positive demand only
+    # If no location-based filtering worked, use proportional approach
+    if wa_flows.shape[0] == flows.shape[0]:  # No filtering occurred
+        print("[DEBUG] No WA filtering applied - using proportional estimate (15% of national)")
+        # Filter for positive demand only first
+        positive_flows = flows[flows['demand'] > 0].copy()
+        
+        # Aggregate national demand by date
+        national_demand = positive_flows.groupby('gasdate')['demand'].sum().reset_index()
+        
+        # Apply WA proportion (approximately 15% of national gas demand)
+        national_demand['demand'] = national_demand['demand'] * 0.15
+        
+        demand = national_demand.rename(columns={'gasdate': 'GasDay', 'demand': 'TJ_Demand'})
+        
+        print(f"[DEBUG] WA Proportional demand profile: {demand.shape}, avg daily: {demand['TJ_Demand'].mean():.1f} TJ")
+        return demand
+    
+    # Process the filtered WA flows
     demand_flows = wa_flows[wa_flows['demand'] > 0].copy()
     print(f"[DEBUG] WA positive demand records: {len(demand_flows)}")
+    
+    if demand_flows.empty:
+        print("[WARNING] No positive demand records after WA filtering - using proportional estimate")
+        # Fallback to proportional approach
+        positive_flows = flows[flows['demand'] > 0].copy()
+        national_demand = positive_flows.groupby('gasdate')['demand'].sum().reset_index()
+        national_demand['demand'] = national_demand['demand'] * 0.15
+        demand = national_demand.rename(columns={'gasdate': 'GasDay', 'demand': 'TJ_Demand'})
+        return demand
     
     # Aggregate demand by date
     demand = demand_flows.groupby('gasdate')['demand'].sum().reset_index()
     
-    # Apply scaling if we couldn't filter properly (fallback to proportional estimate)
-    if 'state' not in flows.columns and 'locationname' not in flows.columns:
-        # WA is approximately 15% of national gas demand
-        demand['demand'] = demand['demand'] * 0.15
-        print("[DEBUG] Applied 15% WA proportion scaling")
-    elif demand['demand'].mean() > 3000:  # Still too high, apply moderate scaling
+    # Apply scaling if demand seems too high
+    if demand['demand'].mean() > 3000:
         demand['demand'] = demand['demand'] / 2.0
-        print("[DEBUG] Applied additional scaling for realistic WA demand")
+        print("[DEBUG] Applied scaling for realistic WA demand levels")
     
     demand.rename(columns={'gasdate': 'GasDay', 'demand': 'TJ_Demand'}, inplace=True)
     
     print(f"[DEBUG] WA Demand profile: {demand.shape}, avg daily: {demand['TJ_Demand'].mean():.1f} TJ")
     return demand
+
 
 def get_model():
     """Main function for WA gas market model"""
