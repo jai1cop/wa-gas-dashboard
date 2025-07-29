@@ -891,13 +891,7 @@ st.write(f"**Selected Facilities ({len(selected_facilities)}):**")
 for i, facility in enumerate(selected_facilities, 1):
     is_match = facility in actual_columns
     status = "✅" if is_match else "❌"
-    st.write(f"{i}. {status} `{facility}`")
-
-# Check for mismatches
-missing_facilities = [f for f in selected_facilities if f not in actual_columns]
-if missing_facilities:
-    st.error(f"❌ **Missing Facilities:** {missing_facilities}")
-        
+          
        if not production_df.empty and not demand_df.empty:
             today_supply = production_df['Total_Supply'].iloc[-1]
             today_demand = demand_df['Market_Demand'].iloc[-1]
