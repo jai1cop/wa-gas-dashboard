@@ -158,4 +158,296 @@ def create_flow_chart(flows_df):
             st.error(f"Error creating flow chart: {e}")
     
     else:
-        # Create bar
+        # Create bar chart with available numeric data
+        if len(flows_df) > 0:
+            fig = px.bar(
+                flows_df.head(20),
+                y=numeric_cols[0] if numeric_cols else flows_df.columns[0],
+                title="Gas Flow Data (Recent Records)",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+def main():
+    # Header
+    st.markdown('<h1 class="main-header">⛽ WA Gas Market Dashboard</h1>', unsafe_allow_html=True)
+    
+    # API Status
+    st.markdown("""
+    <div class="api-status">
+        <strong>🔗 Live API Connection:</strong> This dashboard uses the official WA Gas Bulletin Board API 
+        for real-time data access. No web scraping required!
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar controls
+    st.sidebar.header("🎛️ Dashboard Controls")
+    
+    # Date selector
+    st.sidebar.subheader("📅 Data Selection")
+    use_current = st.sidebar.checkbox("Use Current/Latest Data", value=True)
+    
+    selected_date = None
+    if not use_current:
+        selected_date = st.sidebar.date_input(
+            "Select Gas Date",
+            value=date.today() - timedelta(days=1),
+            max_value=date.today()
+        ).strftime('%Y-%m-%d')
+    
+    # Data refresh
+    if st.sidebar.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+    
+    # Load data
+    with st.spinner('🚀 Loading data from WA GBB API...'):
+        if use_current:
+            datasets = get_all_current_data()
+        else:
+            datasets = {
+                'actual_flows': get_actual_flows(selected_date),
+                'capacity_outlook': get_capacity_outlook(selected_date),
+                'medium_term_capacity': get_medium_term_capacity(selected_date),
+                'forecast_flows': get_forecast_flows(selected_date),
+                'end_user_consumption': get_end_user_consumption(selected_date),
+                'large_user_consumption': get_large_user_consumption(selected_date),
+                'linepack_adequacy': get_linepack_adequacy(selected_date),
+                'trucked_gas': get_trucked_gas(selected_date)
+            }
+    
+    # Summary metrics
+    create_summary_metrics(datasets)
+    
+    # Data freshness indicator
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S AWST')
+    st.markdown(f'<p class="data-timestamp">📅 Dashboard updated: {current_time}</p>', 
+                unsafe_allow_html=True)
+    
+    # Main content tabs
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Flow Analysis", "🔧 Capacity & Constraints", "🏭 Consumption Data", 
+        "📈 Forecasts", "🚛 Transportation", "📋 Raw Data"
+    ])
+    
+    with tab1:
+        st.markdown('<h2 class="sub-header">Gas Flow Analysis</h2>', unsafe_allow_html=True)
+        
+        flows_df = datasets.get('actual_flows', pd.DataFrame())
+        
+        if not flows_df.empty:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                create_flow_chart(flows_df)
+            
+            with col2:
+                st.subheader("📊 Flow Statistics")
+                numeric_cols = flows_df.select_dtypes(include=['number']).columns
+                
+                if len(numeric_cols) > 0:
+                    for col in numeric_cols[:3]:  # Show top 3 numeric columns
+                        if flows_df[col].notna().sum() > 0:
+                            st.metric(
+                                label=col.replace('_', ' ').title(),
+                                value=f"{flows_df[col].sum():.2f}",
+                                delta=f"{flows_df[col].mean():.2f} avg"
+                            )
+            
+            st.subheader("🔍 Recent Flow Data")
+            st.dataframe(flows_df.head(50), use_container_width=True)
+            
+        else:
+            st.info("🔄 No actual flow data available for the selected period.")
+    
+    with tab2:
+        st.markdown('<h2 class="sub-header">Capacity & Constraints</h2>', unsafe_allow_html=True)
+        
+        capacity_df = datasets.get('capacity_outlook', pd.DataFrame())
+        constraints_df = datasets.get('medium_term_capacity', pd.DataFrame())
+        linepack_df = datasets.get('linepack_adequacy', pd.DataFrame())
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("📈 Capacity Outlook")
+            if not capacity_df.empty:
+                st.dataframe(capacity_df.head(20), use_container_width=True)
+                
+                # Try to create capacity visualization
+                numeric_cols = capacity_df.select_dtypes(include=['number']).columns
+                if len(numeric_cols) > 0:
+                    fig = px.bar(
+                        capacity_df.head(10),
+                        y=numeric_cols[0],
+                        title="Capacity Overview",
+                        height=300
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No capacity outlook data available")
+        
+        with col2:
+            st.subheader("⚠️ Medium Term Constraints")
+            if not constraints_df.empty:
+                st.dataframe(constraints_df.head(20), use_container_width=True)
+            else:
+                st.info("No medium term constraint data available")
+        
+        if not linepack_df.empty:
+            st.subheader("🔧 Linepack Adequacy")
+            st.dataframe(linepack_df.head(20), use_container_width=True)
+    
+    with tab3:
+        st.markdown('<h2 class="sub-header">Gas Consumption Data</h2>', unsafe_allow_html=True)
+        
+        end_user_df = datasets.get('end_user_consumption', pd.DataFrame())
+        large_user_df = datasets.get('large_user_consumption', pd.DataFrame())
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🏠 End User Consumption")
+            if not end_user_df.empty:
+                st.dataframe(end_user_df.head(20), use_container_width=True)
+                
+                # Create consumption chart if numeric data available
+                numeric_cols = end_user_df.select_dtypes(include=['number']).columns
+                if len(numeric_cols) > 0:
+                    fig = px.pie(
+                        end_user_df.head(10),
+                        values=numeric_cols[0],
+                        title="End User Consumption Distribution",
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No end user consumption data available")
+        
+        with col2:
+            st.subheader("🏭 Large User Consumption")
+            if not large_user_df.empty:
+                st.dataframe(large_user_df.head(20), use_container_width=True)
+            else:
+                st.info("No large user consumption data available")
+    
+    with tab4:
+        st.markdown('<h2 class="sub-header">Forecast Data</h2>', unsafe_allow_html=True)
+        
+        forecast_df = datasets.get('forecast_flows', pd.DataFrame())
+        
+        if not forecast_df.empty:
+            st.subheader("📊 Flow Forecasts")
+            st.dataframe(forecast_df.head(30), use_container_width=True)
+            
+            # Create forecast visualization
+            numeric_cols = forecast_df.select_dtypes(include=['number']).columns
+            date_cols = [col for col in forecast_df.columns if 'date' in col.lower()]
+            
+            if numeric_cols and date_cols:
+                try:
+                    forecast_df[date_cols[0]] = pd.to_datetime(forecast_df[date_cols[0]], errors='coerce')
+                    
+                    fig = px.line(
+                        forecast_df.head(50),
+                        x=date_cols[0],
+                        y=numeric_cols[0],
+                        title="Gas Flow Forecasts",
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error creating forecast chart: {e}")
+        else:
+            st.info("🔄 No forecast data available for the selected period.")
+    
+    with tab5:
+        st.markdown('<h2 class="sub-header">Transportation Data</h2>', unsafe_allow_html=True)
+        
+        trucked_df = datasets.get('trucked_gas', pd.DataFrame())
+        
+        if not trucked_df.empty:
+            st.subheader("🚛 Trucked Gas Data")
+            st.dataframe(trucked_df.head(30), use_container_width=True)
+            
+            # Create trucked gas visualization
+            numeric_cols = trucked_df.select_dtypes(include=['number']).columns
+            if len(numeric_cols) > 0:
+                fig = px.bar(
+                    trucked_df.head(15),
+                    y=numeric_cols[0],
+                    title="Trucked Gas Volumes",
+                    height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("🔄 No trucked gas data available for the selected period.")
+    
+    with tab6:
+        st.markdown('<h2 class="sub-header">Raw Data Export</h2>', unsafe_allow_html=True)
+        
+        # Dataset selector
+        dataset_names = [name for name, df in datasets.items() if not df.empty]
+        
+        if dataset_names:
+            selected_dataset = st.selectbox(
+                "Select dataset to view/download:",
+                dataset_names,
+                format_func=lambda x: x.replace('_', ' ').title()
+            )
+            
+            selected_df = datasets[selected_dataset]
+            
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.subheader(f"📊 {selected_dataset.replace('_', ' ').title()} Data")
+                st.dataframe(selected_df, use_container_width=True)
+            
+            with col2:
+                st.subheader("📥 Download Options")
+                
+                # CSV download
+                csv_data = selected_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download as CSV",
+                    data=csv_data,
+                    file_name=f"wa_gas_{selected_dataset}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
+                
+                # JSON download
+                json_data = selected_df.to_json(orient='records', indent=2)
+                st.download_button(
+                    label="📄 Download as JSON",
+                    data=json_data,
+                    file_name=f"wa_gas_{selected_dataset}_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                    mime="application/json"
+                )
+                
+                # Show data info
+                st.info(f"""
+                **Dataset Info:**
+                - Records: {len(selected_df):,}
+                - Columns: {len(selected_df.columns)}
+                - Size: {len(csv_data)/1024:.1f} KB
+                """)
+        else:
+            st.warning("⚠️ No data available for download. Please check your API connection.")
+    
+    # Sidebar data status
+    st.sidebar.subheader("📊 Data Status")
+    for name, df in datasets.items():
+        status = "✅" if not df.empty else "⚠️"
+        count = len(df) if not df.empty else 0
+        st.sidebar.write(f"{status} {name.replace('_', ' ').title()}: {count:,} records")
+    
+    # API endpoints info
+    with st.sidebar.expander("🔗 API Endpoints Used"):
+        st.write("**Base URL:** https://gbbwa.aemo.com.au/api/v1/report/")
+        st.write("**Reports:**")
+        for report in api_client.REPORTS.values():
+            st.write(f"- {report}/current.csv")
+
+if __name__ == "__main__":
+    main()
