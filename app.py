@@ -399,30 +399,30 @@ class EnhancedAEMOClient:
         return self._create_simulated_constraints()
     
     def _create_simulated_constraints(self):
-        """Create realistic capacity constraints for demonstration"""
-        
-        today = datetime.now()
-        
-        constraints = [
-            {
-                'facility': 'Gorgon Gas Plant',
-                'capacity_tj_day': 250,  # Reduced from 300
-                'capacity_type': 'MAINTENANCE',
-                'start_date': today + timedelta(days=30),
-                'end_date': today + timedelta(days=45),
-                'description': 'Scheduled maintenance - reduced capacity'
-            },
-            {
-                'facility': 'Wheatstone Gas Plant',
-                'capacity_tj_day': 180,  # Reduced from 230
-                'capacity_type': 'PIPELINE_CONSTRAINT',
-                'start_date': today + timedelta(days=15),
-                'end_date': today + timedelta(days=60),
-                'description': 'Pipeline capacity constraint'
-            }
-        ]
-        
-        return pd.DataFrame(constraints)
+    """Create realistic capacity constraints for demonstration - FIXED"""
+    
+    today = datetime.now()
+    
+    constraints = [
+        {
+            'facility': 'Gorgon Gas Plant',
+            'capacity_tj_day': 250,  # Reduced from 300
+            'capacity_type': 'MAINTENANCE',
+            'start_date': pd.Timestamp(today) + pd.Timedelta(days=30),  # FIXED
+            'end_date': pd.Timestamp(today) + pd.Timedelta(days=45),    # FIXED
+            'description': 'Scheduled maintenance - reduced capacity'
+        },
+        {
+            'facility': 'Wheatstone Gas Plant',
+            'capacity_tj_day': 180,  # Reduced from 230
+            'capacity_type': 'PIPELINE_CONSTRAINT',
+            'start_date': pd.Timestamp(today) + pd.Timedelta(days=15),  # FIXED
+            'end_date': pd.Timestamp(today) + pd.Timedelta(days=60),    # FIXED
+            'description': 'Pipeline capacity constraint'
+        }
+    ]
+    
+    return pd.DataFrame(constraints)
 
 # Initialize enhanced client
 aemo_client = EnhancedAEMOClient()
@@ -531,7 +531,7 @@ def generate_5_year_median_demand():
 
 @st.cache_data(ttl=1800)
 def generate_production_with_capacity_constraints():
-    """Generate production data with Medium Term Capacity constraints applied"""
+    """Generate production data with Medium Term Capacity constraints applied - FIXED"""
     
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365)
@@ -581,14 +581,14 @@ def generate_production_with_capacity_constraints():
                 production = (typical_output * base_utilization * seasonal_factor * 
                              (1 + regional_variation))
                 
-                # Apply Medium Term Capacity constraints
+                # Apply Medium Term Capacity constraints - FIXED
                 facility_production = []
                 
                 for i, date in enumerate(dates):
                     date_production = production[i]
                     effective_capacity = base_capacity
                     
-                    # Check for capacity constraints
+                    # Check for capacity constraints - FIXED DATETIME COMPARISON
                     if not capacity_constraints.empty:
                         facility_constraints = capacity_constraints[capacity_constraints['facility'] == facility]
                         
@@ -596,8 +596,11 @@ def generate_production_with_capacity_constraints():
                             start_constraint = constraint['start_date']
                             end_constraint = constraint['end_date']
                             
+                            # FIX: Convert date to pd.Timestamp for comparison
+                            date_ts = pd.Timestamp(date)
+                            
                             if (pd.notna(start_constraint) and pd.notna(end_constraint) and
-                                start_constraint <= date <= end_constraint):
+                                pd.Timestamp(start_constraint) <= date_ts <= pd.Timestamp(end_constraint)):
                                 
                                 effective_capacity = min(effective_capacity, constraint['capacity_tj_day'])
                     
@@ -626,6 +629,7 @@ def generate_production_with_capacity_constraints():
     df.attrs['total_facilities'] = len(WA_PRODUCTION_FACILITIES_COMPLETE)
     
     return df
+
 
 @st.cache_data(ttl=1800)
 def generate_integrated_storage_data():
