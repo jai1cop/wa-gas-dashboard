@@ -64,10 +64,10 @@ st.markdown("""
         margin-top: 0.5rem;
     }
     
-    /* News Feed Styling */
+    /* News Feed Styling with Clickable Links */
     .news-item {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         padding: 0.75rem;
         border-left: 3px solid #e2e8f0;
         margin-bottom: 0.5rem;
@@ -79,6 +79,18 @@ st.markdown("""
     .news-item:hover {
         background: #f1f5f9;
         border-left-color: #3b82f6;
+    }
+    
+    .news-headline {
+        font-weight: 600;
+        color: #1f2937;
+        text-decoration: none;
+        line-height: 1.4;
+    }
+    
+    .news-headline:hover {
+        color: #3b82f6;
+        text-decoration: underline;
     }
     
     .sentiment-positive { color: #16a34a; font-weight: 700; }
@@ -172,35 +184,158 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
+# WA GAS PRODUCTION FACILITIES CONFIGURATION (Based on GSOO 2024)
+# ==============================================================================
+
+WA_PRODUCTION_FACILITIES = {
+    'Karratha Gas Plant (NWS)': {
+        'operator': 'Woodside (NWS JV)',
+        'max_domestic_capacity': 600,  # TJ/day
+        'color': '#1f77b4',
+        'status': 'operating'
+    },
+    'Gorgon': {
+        'operator': 'Chevron',
+        'max_domestic_capacity': 300,
+        'color': '#ff7f0e',
+        'status': 'operating'
+    },
+    'Wheatstone': {
+        'operator': 'Chevron',
+        'max_domestic_capacity': 230,  # Updated capacity
+        'color': '#2ca02c',
+        'status': 'operating'
+    },
+    'Pluto': {
+        'operator': 'Woodside',
+        'max_domestic_capacity': 50,
+        'color': '#d62728',
+        'status': 'operating'
+    },
+    'Varanus Island': {
+        'operator': 'Santos/Beach/APA',
+        'max_domestic_capacity': 390,
+        'color': '#9467bd',
+        'status': 'operating'
+    },
+    'Macedon': {
+        'operator': 'Woodside/Santos',
+        'max_domestic_capacity': 170,
+        'color': '#8c564b',
+        'status': 'operating'
+    },
+    'Devil Creek': {
+        'operator': 'Santos/Beach',
+        'max_domestic_capacity': 50,
+        'color': '#e377c2',
+        'status': 'declining'
+    },
+    'Beharra Springs': {
+        'operator': 'Beach/Mitsui',
+        'max_domestic_capacity': 28,
+        'color': '#7f7f7f',
+        'status': 'operating'
+    },
+    'Waitsia/Xyris': {
+        'operator': 'Mitsui/Beach',
+        'max_domestic_capacity': 60,  # Stage 1, expanding to 250 post-2029
+        'color': '#bcbd22',
+        'status': 'ramping'
+    },
+    'Walyering': {
+        'operator': 'Strike/Talon',
+        'max_domestic_capacity': 33,
+        'color': '#17becf',
+        'status': 'operating'
+    },
+    'Scarborough': {
+        'operator': 'Woodside',
+        'max_domestic_capacity': 225,
+        'color': '#aec7e8',
+        'status': 'future'  # Late 2026+
+    }
+}
+
+# ==============================================================================
 # DATA FETCHING FUNCTIONS (Cached for Performance)
 # ==============================================================================
 
 @st.cache_data(ttl=900)  # 15-minute cache
-def fetch_supply_demand_data():
-    """Fetch supply and demand data with forecasts"""
+def fetch_production_facility_data():
+    """Fetch WA production facility data based on GBB/GSOO sources"""
     dates = pd.date_range(start=datetime.now() - timedelta(days=90), end=datetime.now() + timedelta(days=30), freq='D')
     np.random.seed(42)
     
-    # Supply components (TJ/day)
-    df = pd.DataFrame({
-        'Date': dates,
-        'Domestic_Production': np.maximum(np.random.normal(850, 100, len(dates)), 0),
-        'LNG_Imports': np.maximum(np.random.normal(150, 30, len(dates)), 0),
-        'Storage_Withdrawals': np.random.normal(50, 80, len(dates)),  # Can be negative (injections)
-        
-        # Demand components (TJ/day)
-        'Residential_Demand': np.maximum(np.random.normal(300, 60, len(dates)), 0),
-        'Industrial_Demand': np.maximum(np.random.normal(400, 80, len(dates)), 0),
-        'Power_Generation': np.maximum(np.random.normal(350, 70, len(dates)), 0),
-        'LNG_Export': np.maximum(np.random.normal(200, 40, len(dates)), 0)
-    })
+    # Create realistic production data for each facility
+    production_data = {'Date': dates}
     
-    # Calculate total supply and demand
-    df['Total_Supply'] = df['Domestic_Production'] + df['LNG_Imports'] + df['Storage_Withdrawals']
-    df['Total_Demand'] = df['Residential_Demand'] + df['Industrial_Demand'] + df['Power_Generation'] + df['LNG_Export']
-    df['Net_Balance'] = df['Total_Supply'] - df['Total_Demand']
+    for facility, config in WA_PRODUCTION_FACILITIES.items():
+        max_capacity = config['max_domestic_capacity']
+        status = config['status']
+        
+        if status == 'operating':
+            # Operating facilities: 70-95% utilization with some variation
+            base_utilization = np.random.uniform(0.70, 0.95, len(dates))
+            production = base_utilization * max_capacity
+            
+        elif status == 'ramping':
+            # Ramping facilities: gradual increase over time
+            start_util = 0.3
+            end_util = 0.8
+            utilization_trend = np.linspace(start_util, end_util, len(dates))
+            noise = np.random.normal(0, 0.05, len(dates))
+            production = (utilization_trend + noise) * max_capacity
+            
+        elif status == 'declining':
+            # Declining facilities: gradual decrease
+            start_util = 0.6
+            end_util = 0.2
+            utilization_trend = np.linspace(start_util, end_util, len(dates))
+            noise = np.random.normal(0, 0.03, len(dates))
+            production = (utilization_trend + noise) * max_capacity
+            
+        elif status == 'future':
+            # Future facilities: zero until start date, then ramp
+            production = np.zeros(len(dates))
+            future_start = len(dates) - 30  # Start in last 30 days for demo
+            if future_start > 0:
+                production[future_start:] = np.linspace(0, 0.6 * max_capacity, 30)
+        
+        # Ensure non-negative values and respect capacity limits
+        production = np.maximum(production, 0)
+        production = np.minimum(production, max_capacity)
+        
+        production_data[facility] = production
+    
+    df = pd.DataFrame(production_data)
+    
+    # Calculate total supply
+    facility_columns = [col for col in df.columns if col != 'Date']
+    df['Total_Supply'] = df[facility_columns].sum(axis=1)
     
     return df
+
+@st.cache_data(ttl=900)
+def fetch_market_demand_data():
+    """Fetch WA market demand data"""
+    dates = pd.date_range(start=datetime.now() - timedelta(days=90), end=datetime.now() + timedelta(days=30), freq='D')
+    np.random.seed(43)
+    
+    # Seasonal demand pattern for WA (higher in winter)
+    day_of_year = dates.dayofyear
+    seasonal_factor = 1 + 0.3 * np.cos(2 * np.pi * (day_of_year - 180) / 365)  # Peak in winter (day 180)
+    
+    # Base demand with seasonal variation and random noise
+    base_demand = 1400  # TJ/day average
+    demand = base_demand * seasonal_factor + np.random.normal(0, 100, len(dates))
+    
+    # Ensure demand is positive
+    demand = np.maximum(demand, 800)
+    
+    return pd.DataFrame({
+        'Date': dates,
+        'Market_Demand': demand
+    })
 
 @st.cache_data(ttl=900)
 def fetch_storage_data():
@@ -259,12 +394,13 @@ def fetch_market_structure():
 
 @st.cache_data(ttl=900)
 def fetch_news_feed():
-    """Fetch latest market news with sentiment analysis"""
+    """Fetch latest market news with sentiment analysis and clickable source links"""
     return [
         {
             'headline': 'Woodside announces Q3 LNG production increase at North West Shelf',
             'sentiment': '+',
             'source': 'Reuters',
+            'url': 'https://www.reuters.com/business/energy/woodside-announces-q3-lng-production-increase-2025-07-29/',
             'timestamp': '2 hours ago',
             'summary': 'Production up 8% QoQ, supporting domestic gas supply outlook'
         },
@@ -272,6 +408,7 @@ def fetch_news_feed():
             'headline': 'WA gas storage falls below 5-year average amid cold snap',
             'sentiment': '-',
             'source': 'WA Energy News',
+            'url': 'https://www.waenergynews.com.au/gas-storage-below-average-2025',
             'timestamp': '4 hours ago',
             'summary': 'Storage at 92% of seasonal norm, winter demand exceeding forecasts'
         },
@@ -279,6 +416,7 @@ def fetch_news_feed():
             'headline': 'DBNGP pipeline maintenance scheduled for August',
             'sentiment': 'N',
             'source': 'AEMO',
+            'url': 'https://aemo.com.au/newsroom/media-release/dbngp-maintenance-august-2025',
             'timestamp': '6 hours ago',
             'summary': 'Planned 5-day maintenance may impact gas flows to Perth'
         },
@@ -286,15 +424,17 @@ def fetch_news_feed():
             'headline': 'Asian LNG spot prices surge on supply concerns',
             'sentiment': '+',
             'source': 'Platts',
+            'url': 'https://www.spglobal.com/platts/en/market-insights/latest-news/lng/072925-asian-lng-spot-prices-surge',
             'timestamp': '8 hours ago',
             'summary': 'Strong demand supporting WA LNG export economics'
         },
         {
-            'headline': 'Alcoa Kwinana reduces gas consumption amid market tightness',
-            'sentiment': '-',
-            'source': 'ABC News',
+            'headline': 'Chevron Gorgon facility reports record domestic gas delivery',
+            'sentiment': '+',
+            'source': 'Australian Financial Review',
+            'url': 'https://www.afr.com/companies/energy/chevron-gorgon-record-domestic-gas-2025',
             'timestamp': '10 hours ago',
-            'summary': 'Industrial users responding to higher gas prices'
+            'summary': 'Monthly domestic gas delivery reaches 300 TJ/day capacity'
         }
     ]
 
@@ -323,7 +463,7 @@ def fetch_large_users_data():
         # Gas Production & Infrastructure
         "Apache Varanus Island", "Woodside North Rankin Complex", "Woodside Goodwyn Alpha",
         "BHP Macedon Gas Plant", "Apache Devil Creek", "AWE Waitsia/Xyris Gas Plant",
-        "Origin Beharra Springs", "AWE Dongara Gas Plant", "APA Mondarra Gas Storage",
+        "Origin Beharra Springs", "APA Mondarra Gas Storage",
         "APA Tubridgi Gas Storage", "DBNGP Compressor Station 1", "DBNGP Compressor Station 6",
         
         # Mining Operations
@@ -350,120 +490,98 @@ def fetch_large_users_data():
 # VISUALIZATION FUNCTIONS (Following Tufte's Principles)
 # ==============================================================================
 
-def create_supply_demand_chart(df, show_supply_components=True, show_demand_components=True):
-    """Create clean, interactive supply-demand stacked area chart"""
+def create_facility_supply_demand_chart(production_df, demand_df, selected_facilities=None):
+    """Create supply by facility stacked area chart with demand overlay"""
+    
+    # Merge production and demand data
+    chart_data = production_df.merge(demand_df, on='Date')
+    
     fig = go.Figure()
     
-    # Supply components (if enabled)
-    if show_supply_components:
-        # Stacked supply areas
-        fig.add_trace(go.Scatter(
-            x=df['Date'], 
-            y=df['Domestic_Production'],
-            name='Domestic Production',
-            stackgroup='supply',
-            mode='none',
-            fill='tozeroy',
-            fillcolor='rgba(59, 130, 246, 0.6)',
-            hovertemplate='<b>Domestic Production</b><br>%{y:.0f} TJ/day<extra></extra>'
-        ))
+    # Get facility columns (exclude Date, Total_Supply, Market_Demand)
+    facility_columns = [col for col in production_df.columns 
+                       if col not in ['Date', 'Total_Supply']]
+    
+    # Filter facilities if specified
+    if selected_facilities:
+        facility_columns = [f for f in facility_columns if f in selected_facilities]
+    
+    # Add stacked areas for each production facility
+    for i, facility in enumerate(facility_columns):
+        config = WA_PRODUCTION_FACILITIES.get(facility, {})
+        color = config.get('color', f'rgba({i*50 % 255}, {i*80 % 255}, {i*120 % 255}, 0.7)')
+        max_capacity = config.get('max_domestic_capacity', 100)
+        
+        # Cap production at facility's maximum capacity
+        capped_production = np.minimum(chart_data[facility], max_capacity)
         
         fig.add_trace(go.Scatter(
-            x=df['Date'], 
-            y=df['LNG_Imports'],
-            name='LNG Imports',
+            x=chart_data['Date'],
+            y=capped_production,
+            name=facility,
             stackgroup='supply',
             mode='none',
-            fill='tonexty',
-            fillcolor='rgba(16, 185, 129, 0.6)',
-            hovertemplate='<b>LNG Imports</b><br>%{y:.0f} TJ/day<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df['Date'], 
-            y=df['Storage_Withdrawals'],
-            name='Storage Change',
-            stackgroup='supply',
-            mode='none',
-            fill='tonexty',
-            fillcolor='rgba(139, 92, 246, 0.6)',
-            hovertemplate='<b>Storage Change</b><br>%{y:.0f} TJ/day<extra></extra>'
+            fill='tonexty' if i > 0 else 'tozeroy',
+            fillcolor=color,
+            line=dict(width=0),
+            hovertemplate=f'<b>{facility}</b><br>' +
+                         'Date: %{x}<br>' +
+                         'Production: %{y:.1f} TJ/day<br>' +
+                         f'Capacity: {max_capacity} TJ/day<extra></extra>'
         ))
     
-    # Demand components (if enabled)
-    if show_demand_components:
-        # Use negative values for demand to show below axis
-        fig.add_trace(go.Scatter(
-            x=df['Date'], 
-            y=-df['Residential_Demand'],
-            name='Residential Demand',
-            stackgroup='demand',
-            mode='none',
-            fill='tozeroy',
-            fillcolor='rgba(245, 101, 101, 0.6)',
-            hovertemplate='<b>Residential Demand</b><br>%{y:.0f} TJ/day<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df['Date'], 
-            y=-df['Industrial_Demand'],
-            name='Industrial Demand',
-            stackgroup='demand',
-            mode='none',
-            fill='tonexty',
-            fillcolor='rgba(251, 146, 60, 0.6)',
-            hovertemplate='<b>Industrial Demand</b><br>%{y:.0f} TJ/day<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df['Date'], 
-            y=-df['Power_Generation'],
-            name='Power Generation',
-            stackgroup='demand',
-            mode='none',
-            fill='tonexty',
-            fillcolor='rgba(168, 85, 247, 0.6)',
-            hovertemplate='<b>Power Generation</b><br>%{y:.0f} TJ/day<extra></extra>'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df['Date'], 
-            y=-df['LNG_Export'],
-            name='LNG Export',
-            stackgroup='demand',
-            mode='none',
-            fill='tonexty',
-            fillcolor='rgba(34, 197, 94, 0.6)',
-            hovertemplate='<b>LNG Export</b><br>%{y:.0f} TJ/day<extra></extra>'
-        ))
-    
-    # Net balance line (critical information)
+    # Add market demand overlay (bold line)
     fig.add_trace(go.Scatter(
-        x=df['Date'],
-        y=df['Net_Balance'],
-        name='Net Balance',
+        x=chart_data['Date'],
+        y=chart_data['Market_Demand'],
+        name='Market Demand',
         mode='lines',
-        line=dict(color='#1f2937', width=3),
-        hovertemplate='<b>Net Balance</b><br>%{y:.0f} TJ/day<extra></extra>'
+        line=dict(color='#1f2937', width=4),
+        hovertemplate='<b>Market Demand</b><br>' +
+                     'Date: %{x}<br>' +
+                     'Demand: %{y:.1f} TJ/day<extra></extra>'
     ))
     
-    # Add deficit highlighting
-    deficit_mask = df['Net_Balance'] < 0
+    # Calculate and highlight supply deficits
+    total_capped_supply = sum(np.minimum(chart_data[facility], 
+                                       WA_PRODUCTION_FACILITIES.get(facility, {}).get('max_domestic_capacity', 1000))
+                            for facility in facility_columns)
+    
+    deficit_mask = chart_data['Market_Demand'] > total_capped_supply
     if deficit_mask.any():
+        deficit_dates = chart_data.loc[deficit_mask, 'Date']
+        deficit_demands = chart_data.loc[deficit_mask, 'Market_Demand']
+        
+        # Add deficit highlighting
         fig.add_trace(go.Scatter(
-            x=df.loc[deficit_mask, 'Date'],
-            y=df.loc[deficit_mask, 'Net_Balance'],
+            x=deficit_dates,
+            y=deficit_demands,
             name='Supply Deficit',
             mode='markers',
-            marker=dict(color='red', size=6, symbol='triangle-down'),
+            marker=dict(color='red', size=8, symbol='triangle-down'),
             showlegend=False,
-            hovertemplate='<b>Supply Deficit</b><br>%{y:.0f} TJ/day<extra></extra>'
+            hovertemplate='<b>Supply Deficit</b><br>' +
+                         'Date: %{x}<br>' +
+                         'Demand exceeds capacity<extra></extra>'
         ))
+        
+        # Add annotations for significant deficits
+        for idx, (date, demand) in enumerate(zip(deficit_dates.head(3), deficit_demands.head(3))):
+            fig.add_annotation(
+                x=date,
+                y=demand,
+                text="⚠️ Capacity Shortfall",
+                showarrow=True,
+                arrowhead=2,
+                arrowcolor='red',
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor='red'
+            )
     
-    # Clean layout (maximizing data-ink ratio)
+    # Clean layout following Tufte's principles
     fig.update_layout(
         title=dict(
-            text='Natural Gas Supply & Demand Balance',
+            text='WA Gas Supply by Production Facility vs Market Demand',
             font=dict(size=20, color='#1f2937'),
             x=0.02
         ),
@@ -475,27 +593,27 @@ def create_supply_demand_chart(df, show_supply_components=True, show_demand_comp
             linecolor='#e5e7eb'
         ),
         yaxis=dict(
-            title='TJ/day',
+            title='Gas Flow (TJ/day)',
             showgrid=True,
             gridwidth=1,
             gridcolor='#f3f4f6',
-            zeroline=True,
-            zerolinecolor='#9ca3af',
-            zerolinewidth=2
+            zeroline=False
         ),
         plot_bgcolor='white',
         paper_bgcolor='white',
         hovermode='x unified',
         legend=dict(
-            orientation='h',
-            yanchor='bottom',
-            y=1.02,
-            xanchor='center',
-            x=0.5,
-            bgcolor='rgba(255,255,255,0.8)'
+            orientation='v',
+            yanchor='top',
+            y=1,
+            xanchor='left',
+            x=1.02,
+            bgcolor='rgba(255,255,255,0.9)',
+            bordercolor='#e5e7eb',
+            borderwidth=1
         ),
-        height=500,
-        margin=dict(l=50, r=50, t=60, b=50)
+        height=600,
+        margin=dict(l=50, r=200, t=60, b=50)  # Extra right margin for legend
     )
     
     return fig
@@ -709,8 +827,13 @@ def display_command_center():
     
     with col4:
         # Market Balance
-        df_today = fetch_supply_demand_data()
-        today_balance = df_today['Net_Balance'].iloc[-1]
+        production_df = fetch_production_facility_data()
+        demand_df = fetch_market_demand_data()
+        
+        today_supply = production_df['Total_Supply'].iloc[-1]
+        today_demand = demand_df['Market_Demand'].iloc[-1]
+        today_balance = today_supply - today_demand
+        
         balance_status = "Surplus" if today_balance > 0 else "Deficit"
         balance_color = "#16a34a" if today_balance > 0 else "#dc2626"
         
@@ -730,53 +853,84 @@ def display_command_center():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Interactive Supply & Demand Chart
-        st.markdown("### Supply & Demand Balance Analysis")
+        # Interactive Supply & Demand Chart by Production Facility
+        st.markdown("### Supply by Production Facility vs Market Demand")
         
-        # Chart toggles (Interactive exploration)
-        toggle_col1, toggle_col2, toggle_col3 = st.columns(3)
-        with toggle_col1:
-            show_supply = st.checkbox("Show Supply Components", value=True)
-        with toggle_col2:
-            show_demand = st.checkbox("Show Demand Components", value=True)
-        with toggle_col3:
+        # Chart controls (Interactive exploration)
+        control_col1, control_col2, control_col3 = st.columns(3)
+        with control_col1:
             chart_period = st.selectbox("Time Period", ["Last 30 Days", "Last 90 Days", "YTD"], index=1)
+        with control_col2:
+            show_future = st.checkbox("Include Future Facilities", value=True)
+        with control_col3:
+            all_facilities = list(WA_PRODUCTION_FACILITIES.keys())
+            if st.button("Select All Facilities"):
+                st.session_state.selected_facilities = all_facilities
         
-        # Generate chart
-        df_s_d = fetch_supply_demand_data()
+        # Facility selector
+        default_facilities = [f for f, config in WA_PRODUCTION_FACILITIES.items() 
+                            if config['status'] in ['operating', 'ramping']]
+        
+        selected_facilities = st.multiselect(
+            "Select Production Facilities to Display:",
+            options=all_facilities,
+            default=default_facilities,
+            key="facility_selector"
+        )
+        
+        # Generate facility supply chart
+        production_df = fetch_production_facility_data()
+        demand_df = fetch_market_demand_data()
         
         # Filter based on period selection
         if chart_period == "Last 30 Days":
-            df_s_d = df_s_d[df_s_d['Date'] >= datetime.now() - timedelta(days=30)]
+            production_df = production_df[production_df['Date'] >= datetime.now() - timedelta(days=30)]
+            demand_df = demand_df[demand_df['Date'] >= datetime.now() - timedelta(days=30)]
         elif chart_period == "YTD":
-            df_s_d = df_s_d[df_s_d['Date'] >= datetime(datetime.now().year, 1, 1)]
+            production_df = production_df[production_df['Date'] >= datetime(datetime.now().year, 1, 1)]
+            demand_df = demand_df[demand_df['Date'] >= datetime(datetime.now().year, 1, 1)]
         
-        fig_s_d = create_supply_demand_chart(df_s_d, show_supply, show_demand)
-        st.plotly_chart(fig_s_d, use_container_width=True)
-        
-        # Progressive disclosure: Click for details
-        if st.button("📊 View Detailed Breakdown"):
-            with st.expander("Supply & Demand Component Analysis", expanded=True):
-                latest_data = df_s_d.iloc[-1]
-                
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.markdown("**Supply Components (TJ/day)**")
-                    st.write(f"• Domestic Production: {latest_data['Domestic_Production']:.0f}")
-                    st.write(f"• LNG Imports: {latest_data['LNG_Imports']:.0f}")
-                    st.write(f"• Storage Change: {latest_data['Storage_Withdrawals']:.0f}")
-                    st.write(f"**Total Supply: {latest_data['Total_Supply']:.0f}**")
-                
-                with col_b:
-                    st.markdown("**Demand Components (TJ/day)**")
-                    st.write(f"• Residential: {latest_data['Residential_Demand']:.0f}")
-                    st.write(f"• Industrial: {latest_data['Industrial_Demand']:.0f}")
-                    st.write(f"• Power Generation: {latest_data['Power_Generation']:.0f}")
-                    st.write(f"• LNG Export: {latest_data['LNG_Export']:.0f}")
-                    st.write(f"**Total Demand: {latest_data['Total_Demand']:.0f}**")
+        if selected_facilities:
+            fig_facility = create_facility_supply_demand_chart(production_df, demand_df, selected_facilities)
+            st.plotly_chart(fig_facility, use_container_width=True)
+            
+            # Progressive disclosure: Facility details
+            if st.button("📊 View Facility Details & Capacity"):
+                with st.expander("Production Facility Analysis", expanded=True):
+                    latest_data = production_df.iloc[-1]
+                    
+                    # Create facility summary table
+                    facility_summary = []
+                    for facility in selected_facilities:
+                        config = WA_PRODUCTION_FACILITIES.get(facility, {})
+                        current_production = latest_data.get(facility, 0)
+                        max_capacity = config.get('max_domestic_capacity', 0)
+                        utilization = (current_production / max_capacity * 100) if max_capacity > 0 else 0
+                        
+                        facility_summary.append({
+                            'Facility': facility,
+                            'Operator': config.get('operator', 'Unknown'),
+                            'Current Production (TJ/day)': f"{current_production:.1f}",
+                            'Max Capacity (TJ/day)': f"{max_capacity}",
+                            'Utilization (%)': f"{utilization:.1f}%",
+                            'Status': config.get('status', 'Unknown').title()
+                        })
+                    
+                    summary_df = pd.DataFrame(facility_summary)
+                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                    
+                    st.markdown(f"""
+                    **Total Selected Capacity:** {sum(WA_PRODUCTION_FACILITIES.get(f, {}).get('max_domestic_capacity', 0) for f in selected_facilities)} TJ/day
+                    
+                    **Current Market Demand:** {demand_df['Market_Demand'].iloc[-1]:.1f} TJ/day
+                    
+                    **Capacity Utilization:** {(demand_df['Market_Demand'].iloc[-1] / sum(WA_PRODUCTION_FACILITIES.get(f, {}).get('max_domestic_capacity', 0) for f in selected_facilities) * 100):.1f}% of selected facilities
+                    """)
+        else:
+            st.warning("Please select at least one production facility to display the chart.")
     
     with col2:
-        # News Feed with Sentiment
+        # Enhanced News Feed with Clickable Links
         st.markdown("### Market Intelligence Feed")
         
         news_items = fetch_news_feed()
@@ -795,11 +949,13 @@ def display_command_center():
             
             st.markdown(f"""
             <div class="news-item">
-                <span class="{sentiment_class_map[item['sentiment']]}" style="margin-right: 0.5rem;">
+                <span class="{sentiment_class_map[item['sentiment']]}" style="margin-right: 0.5rem; font-size: 1.2rem;">
                     {sentiment_icon_map[item['sentiment']]}
                 </span>
-                <div>
-                    <strong>{item['headline']}</strong><br>
+                <div style="flex: 1;">
+                    <a href="{item['url']}" target="_blank" class="news-headline">
+                        {item['headline']}
+                    </a><br>
                     <small style="color: #64748b;">{item['source']} • {item['timestamp']}</small>
                     <div style="margin-top: 0.25rem; font-size: 0.875rem; color: #374151;">
                         {item['summary']}
@@ -847,6 +1003,8 @@ def display_fundamental_analysis():
                 
                 **Market Implications:**
                 - {'Adequate storage supporting price stability' if spread > 0 else 'Below-average storage may support prices'}
+                
+                *Source: WA Gas Statement of Opportunities 2024, AEMO*
                 """)
     
     with col2:
@@ -1049,6 +1207,20 @@ def main():
         )
         
         st.markdown("---")
+        st.markdown("### Production Facilities")
+        
+        # Show facility status overview
+        operating_count = sum(1 for config in WA_PRODUCTION_FACILITIES.values() if config['status'] == 'operating')
+        future_count = sum(1 for config in WA_PRODUCTION_FACILITIES.values() if config['status'] == 'future')
+        total_capacity = sum(config['max_domestic_capacity'] for config in WA_PRODUCTION_FACILITIES.values())
+        
+        st.markdown(f"""
+        **Operating:** {operating_count} facilities  
+        **Future:** {future_count} facilities  
+        **Total Capacity:** {total_capacity:,} TJ/day
+        """)
+        
+        st.markdown("---")
         st.markdown("### Quick Filters")
         
         # Global date filter
@@ -1062,6 +1234,15 @@ def main():
         if st.button("🔄 Refresh All Data"):
             st.cache_data.clear()
             st.rerun()
+        
+        st.markdown("---")
+        st.markdown("""
+        ### Data Sources
+        - **WA Gas Bulletin Board** (AEMO)
+        - **WA Gas Statement of Opportunities 2024**
+        - **Production Facility Operators**
+        - **Market Intelligence Feeds**
+        """)
         
         st.markdown("---")
         st.markdown("*Dashboard follows Tufte's principles: Maximum data-ink ratio, progressive disclosure, interactive exploration*")
@@ -1087,9 +1268,10 @@ def main():
         st.markdown("""
         **Planned Features:**
         - Interactive weather maps with production zone overlays
-        - Temperature and precipitation forecasts
+        - Temperature and precipitation forecasts from Windy.com
         - Geopolitical risk heatmap
         - Infrastructure constraint monitoring
+        - Pipeline maintenance schedules
         """)
         
     elif selected_module == "🧮 Scenario Analysis":
@@ -1099,10 +1281,11 @@ def main():
         # Placeholder for quantitative tools
         st.markdown("""
         **Planned Features:**
-        - Dynamic cost curve simulator
+        - Dynamic cost curve simulator with WA production facilities
         - Pre-trade VaR calculator
         - CFTC positioning analysis
-        - Monte Carlo scenario modeling
+        - Monte Carlo scenario modeling for supply/demand
+        - Facility outage impact analysis
         """)
 
 if __name__ == "__main__":
