@@ -139,42 +139,50 @@ api_client = WA_GBB_API()
 @st.cache_data(ttl=900)  # Cache for 15 minutes
 def get_actual_flows(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get actual gas flows data"""
-    return api_client.fetch_report('actual_flows', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('actual_flows', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 @st.cache_data(ttl=1800)  # Cache for 30 minutes  
 def get_capacity_outlook(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get capacity outlook data"""
-    return api_client.fetch_report('capacity_outlook', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('capacity_outlook', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_medium_term_capacity(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get medium term capacity constraints"""
-    return api_client.fetch_report('medium_term_capacity', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('medium_term_capacity', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 @st.cache_data(ttl=1800)
 def get_forecast_flows(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get forecast flows data"""
-    return api_client.fetch_report('forecast_flows', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('forecast_flows', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 @st.cache_data(ttl=1800)
 def get_end_user_consumption(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get end user consumption data"""
-    return api_client.fetch_report('end_user_consumption', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('end_user_consumption', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 @st.cache_data(ttl=1800)
 def get_large_user_consumption(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get large user consumption data"""
-    return api_client.fetch_report('large_user_consumption', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('large_user_consumption', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 @st.cache_data(ttl=3600)
 def get_linepack_adequacy(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get linepack capacity adequacy data"""
-    return api_client.fetch_report('linepack_adequacy', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('linepack_adequacy', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 @st.cache_data(ttl=1800)
 def get_trucked_gas(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get trucked gas data"""
-    return api_client.fetch_report('trucked_gas', gas_date) or pd.DataFrame()
+    result = api_client.fetch_report('trucked_gas', gas_date)
+    return result if result is not None else pd.DataFrame()
 
 def get_all_current_data() -> Dict[str, pd.DataFrame]:
     """
