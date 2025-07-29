@@ -2,6 +2,8 @@ import pandas as pd
 import os
 from typing import Optional, Dict, Any
 import logging
+import numpy as np
+from datetime import datetime, timedelta
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -69,33 +71,60 @@ def get_sample_data(data_type: str) -> pd.DataFrame:
     Generate sample data if real data is unavailable
     
     Args:
-        data_type (str): Type of sample data ('supply', 'demand', 'model')
+        data_type (str): Type of sample data ('supply', 'demand', 'flows', 'prices')
     
     Returns:
         pd.DataFrame: Sample data
     """
+    # Generate date range for last 30 days
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=30)
+    dates = pd.date_range(start=start_date, end=end_date, freq='D')
+    
     if data_type == 'supply':
-        return pd.DataFrame({
-            'product_id': ['P001', 'P002', 'P003'],
-            'supply_quantity': [100, 200, 150],
-            'location': ['Warehouse A', 'Warehouse B', 'Warehouse C'],
-            'date': pd.date_range('2024-01-01', periods=3)
-        })
+        data = []
+        for date in dates:
+            data.append({
+                'Date': date,
+                'Supply': np.random.uniform(900, 1100),
+                'Source': np.random.choice(['Gas Field A', 'Gas Field B', 'LNG Import']),
+                'Region': 'Western Australia'
+            })
+        return pd.DataFrame(data)
     
     elif data_type == 'demand':
-        return pd.DataFrame({
-            'product_id': ['P001', 'P002', 'P003'],
-            'demand_quantity': [80, 180, 120],
-            'region': ['North', 'South', 'East'],
-            'date': pd.date_range('2024-01-01', periods=3)
-        })
+        data = []
+        for date in dates:
+            data.append({
+                'Date': date,
+                'Demand': np.random.uniform(800, 1000),
+                'Sector': np.random.choice(['Industrial', 'Commercial', 'Residential']),
+                'Region': 'Western Australia'
+            })
+        return pd.DataFrame(data)
     
-    elif data_type == 'model':
-        return pd.DataFrame({
-            'model_id': ['M001', 'M002', 'M003'],
-            'accuracy': [0.85, 0.92, 0.78],
-            'model_type': ['Linear', 'Random Forest', 'Neural Network']
-        })
+    elif data_type == 'flows':
+        data = []
+        for date in dates:
+            data.append({
+                'Date': date,
+                'Pipeline_Flow': np.random.uniform(800, 1200),
+                'Storage_Level': np.random.uniform(60, 90),
+                'Import_Volume': np.random.uniform(0, 100),
+                'Export_Volume': np.random.uniform(50, 200)
+            })
+        return pd.DataFrame(data)
+    
+    elif data_type == 'prices':
+        data = []
+        for date in dates:
+            data.append({
+                'Date': date,
+                'Price_GJ': np.random.uniform(10, 15),
+                'Market': 'WA Gas Market',
+                'Currency': 'AUD'
+            })
+        return pd.DataFrame(data)
     
     else:
         return pd.DataFrame()
