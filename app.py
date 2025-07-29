@@ -247,88 +247,132 @@ def get_news_feed():
 # ==============================================================================
 
 def create_supply_demand_chart(production_df, demand_df, selected_facilities):
-    """Create supply vs demand chart"""
+    """Create supply vs demand chart with enhanced error handling"""
     
     if not selected_facilities:
+        st.warning("⚠️ No facilities selected for chart")
         return go.Figure()
     
-    # Merge data
-    chart_data = production_df.merge(demand_df, on='Date', how='inner')
-    
-    fig = go.Figure()
-    
-    # Add stacked areas for production facilities
-    for i, facility in enumerate(selected_facilities):
-        if facility in chart_data.columns:
-            config = WA_FACILITIES.get(facility, {})
-            color = config.get('color', f'rgba(100, 100, 100, 0.8)')
+    try:
+        # Debug information
+        st.write("**🔍 Chart Debug Info:**")
+        st.write(f"- Production data shape: {production_df.shape}")
+        st.write(f"- Demand data shape: {demand_df.shape}")
+        st.write(f"- Selected facilities: {selected_facilities}")
+        st.write(f"- Production columns: {list(production_df.columns)}")
+        st.write(f"- Demand columns: {list(demand_df.columns)}")
+        
+        # Ensure Date columns are properly formatted
+        production_clean = production_df.copy()
+        demand_clean = demand_df.copy()
+        
+        # Convert Date columns to datetime and then to date for consistent merging
+        production_clean['Date'] = pd.to_datetime(production_clean['Date']).dt.date
+        demand_clean['Date'] = pd.to_datetime(demand_clean['Date']).dt.date
+        
+        # Merge data with better error handling
+        chart_data = production_clean.merge(demand_clean, on='Date', how='inner')
+        
+        if chart_data.empty:
+            st.error("❌ No matching dates between production and demand data")
+            return go.Figure()
+        
+        # Convert Date back to datetime for plotting
+        chart_data['Date'] = pd.to_datetime(chart_data['Date'])
+        
+        st.write(f"- Merged data shape: {chart_data.shape}")
+        st.write(f"- Date range: {chart_data['Date'].min()} to {chart_data['Date'].max()}")
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Add stacked areas for production facilities
+        for i, facility in enumerate(selected_facilities):
+            if facility in chart_data.columns:
+                config = WA_FACILITIES.get(facility, {})
+                color = config.get('color', f'rgba({100 + i*30}, {150 + i*20}, 200, 0.8)')
+                operator = config.get('operator', 'Unknown')
+                capacity = config.get('capacity', 0)
+                
+                # Get production values and handle NaN
+                production_values = chart_data[facility].fillna(0)
+                
+                st.write(f"- {facility}: {len(production_values)} data points, avg: {production_values.mean():.1f} TJ/day")
+                
+                fig.add_trace(go.Scatter(
+                    x=chart_data['Date'],
+                    y=production_values,
+                    name=facility,
+                    stackgroup='supply',
+                    mode='none',
+                    fill='tonexty' if i > 0 else 'tozeroy',
+                    fillcolor=color,
+                    line=dict(width=0),
+                    hovertemplate=f'<b>{facility}</b><br>' +
+                                 f'Operator: {operator}<br>' +
+                                 'Date: %{x|%Y-%m-%d}<br>' +
+                                 'Production: %{y:.1f} TJ/day<br>' +
+                                 f'Capacity: {capacity} TJ/day<extra></extra>'
+                ))
+            else:
+                st.warning(f"⚠️ Facility '{facility}' not found in production data columns")
+        
+        # Add demand line
+        if 'Market_Demand' in chart_data.columns:
+            demand_values = chart_data['Market_Demand'].fillna(0)
+            st.write(f"- Market Demand: {len(demand_values)} data points, avg: {demand_values.mean():.1f} TJ/day")
             
             fig.add_trace(go.Scatter(
                 x=chart_data['Date'],
-                y=chart_data[facility],
-                name=facility,
-                stackgroup='supply',
-                mode='none',
-                fill='tonexty' if i > 0 else 'tozeroy',
-                fillcolor=color,
-                line=dict(width=0),
-                hovertemplate=f'<b>{facility}</b><br>' +
-                             'Date: %{x}<br>' +
-                             'Production: %{y:.1f} TJ/day<extra></extra>'
+                y=demand_values,
+                name='Market Demand',
+                mode='lines',
+                line=dict(color='#1f2937', width=4),
+                hovertemplate='<b>Market Demand</b><br>' +
+                             'Date: %{x|%Y-%m-%d}<br>' +
+                             'Demand: %{y:.1f} TJ/day<extra></extra>'
             ))
-    
-    # Add demand line
-    fig.add_trace(go.Scatter(
-        x=chart_data['Date'],
-        y=chart_data['Market_Demand'],
-        name='Market Demand',
-        mode='lines',
-        line=dict(color='#1f2937', width=3),
-        hovertemplate='<b>Market Demand</b><br>' +
-                     'Date: %{x}<br>' +
-                     'Demand: %{y:.1f} TJ/day<extra></extra>'
-    ))
-    
-    fig.update_layout(
-        title='WA Gas Supply by Facility vs Market Demand',
-        xaxis_title='Date',
-        yaxis_title='Gas Flow (TJ/day)',
-        height=500,
-        hovermode='x unified',
-        plot_bgcolor='white'
-    )
-    
-    return fig
+        else:
+            st.error("❌ 'Market_Demand' column not found in merged data")
+        
+        # Enhanced layout
+        fig.update_layout(
+            title=dict(
+                text='WA Gas Supply by Facility vs Market Demand',
+                font=dict(size=18, color='#1f2937')
+            ),
+            xaxis=dict(
+                title='Date',
+                showgrid=True,
+                gridcolor='#f0f0f0'
+            ),
+            yaxis=dict(
+                title='Gas Flow (TJ/day)',
+                showgrid=True,
+                gridcolor='#f0f0f0'
+            ),
+            height=550,
+            hovermode='x unified',
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            legend=dict(
+                orientation='v',
+                yanchor='top',
+                y=1,
+                xanchor='left',
+                x=1.02
+            ),
+            margin=dict(l=60, r=200, t=60, b=60)
+        )
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"❌ Chart creation error: {e}")
+        st.write("**Debug trace:**")
+        st.code(str(e))
+        return go.Figure()
 
-def create_capacity_chart():
-    """Create facility capacity chart"""
-    
-    facilities = []
-    capacities = []
-    colors = []
-    
-    for facility, config in WA_FACILITIES.items():
-        facilities.append(facility)
-        capacities.append(config['capacity'])
-        colors.append(config['color'])
-    
-    fig = go.Figure(go.Bar(
-        y=facilities,
-        x=capacities,
-        orientation='h',
-        marker_color=colors,
-        text=capacities,
-        textposition='auto'
-    ))
-    
-    fig.update_layout(
-        title='WA Gas Production Facilities - Maximum Capacity',
-        xaxis_title='Capacity (TJ/day)',
-        height=400,
-        plot_bgcolor='white'
-    )
-    
-    return fig
 
 # ==============================================================================
 # MAIN DASHBOARD
