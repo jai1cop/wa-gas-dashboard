@@ -163,4 +163,6 @@ def get_end_user_consumption(gas_date: Optional[str] = None) -> pd.DataFrame:
 @st.cache_data(ttl=1800)
 def get_large_user_consumption(gas_date: Optional[str] = None) -> pd.DataFrame:
     """Get large user consumption data"""
-    return api_client.fetch_report('large_user_consumption', gas_
+    return api_client.fetch_report('large_user_consumption', gas_date) or pd.DataFrame()
+
+
