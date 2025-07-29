@@ -96,6 +96,63 @@ def clean_mto(df):
     
     if df.empty:
         return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available"])
+    # Add this debugging section after your existing debug code
+st.sidebar.write("**🔍 WA Data Source Investigation:**")
+
+# Test the WA URLs directly
+try:
+    import requests
+    
+    # Test different possible WA data endpoints
+    wa_base_urls = [
+        "https://gbbwa.aemo.com.au/data/",
+        "https://gbbwa.aemo.com.au/reports/",
+        "https://gbbwa.aemo.com.au/csv/",
+        "https://gbbwa.aemo.com.au/downloads/",
+    ]
+    
+    test_files = [
+        "ActualFlowStorage.csv",
+        "NameplateRating.csv", 
+        "MediumTermCapacityOutlook.csv",
+        "current/ActualFlowStorage.csv",
+        "current/NameplateRating.csv",
+    ]
+    
+    for base_url in wa_base_urls:
+        st.sidebar.write(f"**Testing: {base_url}**")
+        for file_name in test_files:
+            try:
+                url = base_url + file_name
+                response = requests.head(url, timeout=10)  # Use HEAD to avoid downloading
+                if response.status_code == 200:
+                    st.sidebar.success(f"✅ Found: {url}")
+                else:
+                    st.sidebar.error(f"❌ {response.status_code}: {url}")
+            except Exception as e:
+                st.sidebar.error(f"❌ Error: {url} - {str(e)[:50]}")
+                
+except Exception as e:
+    st.sidebar.error(f"URL testing failed: {e}")
+
+# Test what's actually being downloaded
+st.sidebar.write("**📁 Raw File Analysis:**")
+try:
+    for key in ['nameplate', 'mto_future', 'flows']:
+        try:
+            df = dfc.fetch_csv(key, force=True)
+            st.sidebar.write(f"**{key}:**")
+            st.sidebar.write(f"Shape: {df.shape}")
+            if not df.empty:
+                st.sidebar.write(f"Columns: {list(df.columns)}")
+                st.sidebar.dataframe(df.head(2))
+            else:
+                st.sidebar.error(f"{key} is empty")
+        except Exception as e:
+            st.sidebar.error(f"{key} error: {e}")
+except Exception as e:
+    st.sidebar.error(f"File analysis failed: {e}")
+
     
     # Look for required columns in WA MTO structure
     date_col = None
