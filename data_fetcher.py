@@ -280,4 +280,4 @@ def get_model():
         supply_total = latest_supply['TJ_Available'].sum()
         dem['TJ_Available'] = supply_total
         dem['Shortfall'] = dem['TJ_Available'] - dem['TJ_Demand']
-        print(f"[DEBUG] Used latest W
+        print(f"[DEBUG] Used latest WA supply {supply_total} TJ for all demand dates")
