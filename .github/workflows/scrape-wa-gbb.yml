@@ -1,0 +1,35 @@
+name: Scrape WA GBB Data
+
+on:
+  schedule:
+    # Run every 2 hours during business days
+    - cron: '0 */2 * * 1-5'
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install playwright pandas beautifulsoup4 requests lxml
+        playwright install chromium
+    
+    - name: Run scraper
+      run: python scripts/github_scraper.py
+    
+    - name: Commit and push if data changed
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data/*.csv
+        git diff --staged --quiet || git commit -m "Update WA GBB data $(date)"
+        git push
