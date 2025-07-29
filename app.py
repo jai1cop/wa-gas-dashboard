@@ -879,10 +879,6 @@ def display_command_center():
         # Market Balance
         production_df = fetch_production_facility_data()
         demand_df = fetch_market_demand_data()
-st.write(f"**Selected Facilities ({len(selected_facilities)}):**")
-for i, facility in enumerate(selected_facilities, 1):
-    is_match = facility in actual_columns
-    status = "✅" if is_match else "❌"
           
        if not production_df.empty and not demand_df.empty:
             today_supply = production_df['Total_Supply'].iloc[-1]
