@@ -1,153 +1,166 @@
-import requests
-from bs4 import BeautifulSoup
 import pandas as pd
+import requests
+from datetime import datetime, date
 import logging
-import time
-from io import StringIO
+import json
+from typing import Optional, Dict, Any
+import streamlit as st
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def scrape_static_content(url, page_name):
+class WA_GBB_API:
     """
-    Scrape static HTML content without browser automation
+    Western Australian Gas Bulletin Board API Client
+    Uses official AEMO API endpoints - no authentication required
     """
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-        }
-        
-        logger.info(f"Fetching {page_name} from: {url}")
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Look for tables in the static HTML
-        tables = soup.find_all('table')
-        for table in tables:
-            try:
-                df = pd.read_html(str(table))[0]
-                if not df.empty and df.shape[1] > 1:
-                    logger.info(f"✅ Found data in {page_name} - Shape: {df.shape}")
-                    return df
-            except:
-                continue
-        
-        # If no tables, try to find CSV links or data URLs
-        csv_links = soup.find_all('a', href=lambda x: x and '.csv' in x.lower())
-        for link in csv_links:
-            try:
-                csv_url = link.get('href')
-                if not csv_url.startswith('http'):
-                    csv_url = 'https://gbbwa.aemo.com.au' + csv_url
-                
-                csv_response = requests.get(csv_url, headers=headers, timeout=30)
-                csv_response.raise_for_status()
-                df = pd.read_csv(StringIO(csv_response.text))
-                
-                if not df.empty:
-                    logger.info(f"✅ Found CSV data for {page_name} - Shape: {df.shape}")
-                    return df
-            except:
-                continue
-        
-        logger.warning(f"⚠️ No data found for {page_name}")
-        return pd.DataFrame()
-        
-    except Exception as e:
-        logger.error(f"❌ Error fetching {page_name}: {e}")
-        return pd.DataFrame()
-
-def try_api_endpoints():
-    """
-    Try common API endpoints that might work
-    """
-    endpoints = {
-        'flows': [
-            'https://gbbwa.aemo.com.au/api/flows.json',
-            'https://gbbwa.aemo.com.au/data/flows.csv',
-            'https://gbbwa.aemo.com.au/export/flows.csv'
-        ],
-        'capacity': [
-            'https://gbbwa.aemo.com.au/api/capacity.json',
-            'https://gbbwa.aemo.com.au/data/capacity.csv',
-            'https://gbbwa.aemo.com.au/export/capacity.csv'
-        ],
-        'storage': [
-            'https://gbbwa.aemo.com.au/api/storage.json',
-            'https://gbbwa.aemo.com.au/data/storage.csv',
-            'https://gbbwa.aemo.com.au/export/storage.csv'
-        ]
+    
+    BASE_URL = "https://gbbwa.aemo.com.au/api/v1/report"
+    
+    # Report mapping based on API documentation
+    REPORTS = {
+        'actual_flows': 'actualFlow',
+        'capacity_outlook': 'capacityOutlook', 
+        'medium_term_capacity': 'mediumTermCapacity',
+        'forecast_flows': 'forecastFlow',
+        'end_user_consumption': 'endUserConsumption',
+        'large_user_consumption': 'largeUserConsumption',
+        'linepack_adequacy': 'linepackCapacityAdequacy',
+        'trucked_gas': 'truckedGas',
+        'storage': 'storageCapacity'  # If available
     }
     
-    results = {}
-    headers = {'User-Agent': 'Mozilla/5.0 (compatible; DataBot/1.0)'}
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'WA-Gas-Dashboard/1.0',
+            'Accept': 'text/csv,application/json'
+        })
     
-    for data_type, urls in endpoints.items():
-        for url in urls:
-            try:
-                response = requests.get(url, headers=headers, timeout=15)
-                if response.status_code == 200:
-                    if '.json' in url:
-                        data = response.json()
-                        df = pd.DataFrame(data)
-                    else:
-                        df = pd.read_csv(StringIO(response.text))
-                    
-                    if not df.empty:
-                        logger.info(f"✅ API endpoint found for {data_type}: {url}")
-                        results[data_type] = df
-                        break
-            except:
-                continue
+    def fetch_report(self, report_name: str, gas_date: Optional[str] = None, 
+                    format_type: str = 'csv') -> Optional[pd.DataFrame]:
+        """
+        Fetch a report from the WA GBB API
         
-        if data_type not in results:
-            results[data_type] = pd.DataFrame()
+        Args:
+            report_name: Name of the report (key from REPORTS dict)
+            gas_date: Specific date (YYYY-MM-DD) or None for current
+            format_type: 'csv' or 'json'
+        
+        Returns:
+            DataFrame with the report data or None if failed
+        """
+        
+        if report_name not in self.REPORTS:
+            logger.error(f"Unknown report: {report_name}. Available: {list(self.REPORTS.keys())}")
+            return None
+        
+        api_report_name = self.REPORTS[report_name]
+        
+        # Build URL
+        if gas_date:
+            endpoint = f"{self.BASE_URL}/{api_report_name}/{gas_date}"
+        else:
+            endpoint = f"{self.BASE_URL}/{api_report_name}/current"
+        
+        if format_type == 'csv':
+            endpoint += '.csv'
+        
+        try:
+            logger.info(f"📡 Fetching {report_name} from: {endpoint}")
+            
+            response = self.session.get(endpoint, timeout=30)
+            response.raise_for_status()
+            
+            if format_type == 'csv':
+                # Parse CSV directly into DataFrame
+                df = pd.read_csv(pd.StringIO(response.text))
+                logger.info(f"✅ {report_name}: {len(df)} records loaded")
+                
+                # Add metadata
+                df['data_source'] = 'WA_GBB_API'
+                df['fetched_at'] = datetime.now().isoformat()
+                df['gas_date_requested'] = gas_date or 'current'
+                
+                return df
+            
+            else:  # JSON format
+                data = response.json()
+                if isinstance(data, dict) and 'data' in data:
+                    df = pd.DataFrame(data['data'])
+                else:
+                    df = pd.DataFrame(data)
+                
+                logger.info(f"✅ {report_name}: {len(df)} records loaded")
+                
+                # Add metadata
+                df['data_source'] = 'WA_GBB_API'
+                df['fetched_at'] = datetime.now().isoformat() 
+                df['gas_date_requested'] = gas_date or 'current'
+                
+                return df
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ API request failed for {report_name}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error parsing {report_name} data: {e}")
+            return None
     
-    return results['flows'], results['capacity'], results['storage']
+    def get_available_dates(self, report_name: str) -> list:
+        """
+        Get list of available dates for a report (if supported by API)
+        """
+        if report_name not in self.REPORTS:
+            return []
+        
+        api_report_name = self.REPORTS[report_name]
+        endpoint = f"{self.BASE_URL}/{api_report_name}"
+        
+        try:
+            response = self.session.get(endpoint, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract dates from API response (format may vary)
+            if isinstance(data, dict) and 'available_dates' in data:
+                return data['available_dates']
+            
+        except Exception as e:
+            logger.debug(f"Could not fetch available dates for {report_name}: {e}")
+        
+        return []
 
-def get_daily_flows():
-    """Try multiple methods to get flows data"""
-    # Method 1: Try direct page scraping
-    df = scrape_static_content("https://gbbwa.aemo.com.au/#flows", "Daily Flows")
-    if not df.empty:
-        return df
-    
-    # Method 2: Try API endpoints
-    flows, _, _ = try_api_endpoints()
-    return flows
+# Initialize API client
+api_client = WA_GBB_API()
 
-def get_medium_term_constraints():
-    """Try multiple methods to get capacity data"""
-    df = scrape_static_content("https://gbbwa.aemo.com.au/#reports/mediumTermCapacity", "Medium Term Capacity")
-    if not df.empty:
-        return df
-    
-    _, capacity, _ = try_api_endpoints()
-    return capacity
+# Main data fetching functions
+@st.cache_data(ttl=900)  # Cache for 15 minutes
+def get_actual_flows(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get actual gas flows data"""
+    return api_client.fetch_report('actual_flows', gas_date) or pd.DataFrame()
 
-def get_storage_history():
-    """Try multiple methods to get storage data"""
-    df = scrape_static_content("https://gbbwa.aemo.com.au/#reports/actualFlow", "Storage Data")
-    if not df.empty:
-        return df
-    
-    _, _, storage = try_api_endpoints()
-    return storage
+@st.cache_data(ttl=1800)  # Cache for 30 minutes  
+def get_capacity_outlook(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get capacity outlook data"""
+    return api_client.fetch_report('capacity_outlook', gas_date) or pd.DataFrame()
 
-def get_all_gbb_data():
-    """Get all data using Streamlit Cloud compatible methods"""
-    logger.info("🌐 Starting data collection (Streamlit Cloud compatible)")
-    
-    flows = get_daily_flows()
-    constraints = get_medium_term_constraints()
-    storage = get_storage_history()
-    
-    logger.info(f"📊 Data collection complete - Flows: {flows.shape}, Constraints: {constraints.shape}, Storage: {storage.shape}")
-    
-    return flows, constraints, storage
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_medium_term_capacity(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get medium term capacity constraints"""
+    return api_client.fetch_report('medium_term_capacity', gas_date) or pd.DataFrame()
+
+@st.cache_data(ttl=1800)
+def get_forecast_flows(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get forecast flows data"""
+    return api_client.fetch_report('forecast_flows', gas_date) or pd.DataFrame()
+
+@st.cache_data(ttl=1800)
+def get_end_user_consumption(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get end user consumption data"""
+    return api_client.fetch_report('end_user_consumption', gas_date) or pd.DataFrame()
+
+@st.cache_data(ttl=1800)
+def get_large_user_consumption(gas_date: Optional[str] = None) -> pd.DataFrame:
+    """Get large user consumption data"""
+    return api_client.fetch_report('large_user_consumption', gas_
