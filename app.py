@@ -6,6 +6,40 @@ from plotly.subplots import make_subplots
 from datetime import datetime, date, timedelta
 import json
 
+def create_advanced_header():
+    """Create a professional header with navigation"""
+    
+    # Top banner
+    st.markdown("""
+    <div style="background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 1rem 0; margin: -1rem -1rem 2rem -1rem;">
+        <div style="max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center;">
+                    <div style="font-size: 2.5rem; margin-right: 1rem;">⛽</div>
+                    <div>
+                        <h1 style="color: white; margin: 0; font-size: 2rem; font-weight: 600;">WA Gas Market Dashboard</h1>
+                        <p style="color: #b3d9ff; margin: 0; font-size: 1rem;">Real-time Gas Bulletin Board Analytics</p>
+                    </div>
+                </div>
+                <div style="text-align: right; color: white;">
+                    <div style="font-size: 0.9rem; opacity: 0.8;">Data Source</div>
+                    <div style="font-weight: 600;">AEMO WA GBB API</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Navigation breadcrumb
+    st.markdown("""
+    <div style="margin-bottom: 1.5rem; padding: 0.5rem 0; border-bottom: 1px solid #e0e0e0;">
+        <span style="color: #666; font-size: 0.9rem;">
+            🏠 Home → 📊 Analytics → ⛽ WA Gas Market
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def has_data(obj):
     """Helper function to safely check if pandas objects have data"""
     if hasattr(obj, '__len__'):
