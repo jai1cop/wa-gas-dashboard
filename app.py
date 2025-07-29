@@ -1167,7 +1167,7 @@ def display_integrated_main_dashboard():
                     regions[region] = []
                 regions[region].append(facility)
             def display_safe_main_dashboard():
-    """Main dashboard with redesigned chart creation"""
+            """Main dashboard with redesigned chart creation"""
     
     # ... (keep all your existing header and KPI code)
     
