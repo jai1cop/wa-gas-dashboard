@@ -399,30 +399,30 @@ class EnhancedAEMOClient:
         return self._create_simulated_constraints()
     
     def _create_simulated_constraints(self):
-    """Create realistic capacity constraints for demonstration - FIXED"""
-    
-    today = datetime.now()
-    
-    constraints = [
-        {
-            'facility': 'Gorgon Gas Plant',
-            'capacity_tj_day': 250,  # Reduced from 300
-            'capacity_type': 'MAINTENANCE',
-            'start_date': pd.Timestamp(today) + pd.Timedelta(days=30),  # FIXED
-            'end_date': pd.Timestamp(today) + pd.Timedelta(days=45),    # FIXED
-            'description': 'Scheduled maintenance - reduced capacity'
-        },
-        {
-            'facility': 'Wheatstone Gas Plant',
-            'capacity_tj_day': 180,  # Reduced from 230
-            'capacity_type': 'PIPELINE_CONSTRAINT',
-            'start_date': pd.Timestamp(today) + pd.Timedelta(days=15),  # FIXED
-            'end_date': pd.Timestamp(today) + pd.Timedelta(days=60),    # FIXED
-            'description': 'Pipeline capacity constraint'
-        }
-    ]
-    
-    return pd.DataFrame(constraints)
+        """Create realistic capacity constraints for demonstration - FIXED"""
+        
+        today = datetime.now()
+        
+        constraints = [
+            {
+                'facility': 'Gorgon Gas Plant',
+                'capacity_tj_day': 250,  # Reduced from 300
+                'capacity_type': 'MAINTENANCE',
+                'start_date': pd.Timestamp(today) + pd.Timedelta(days=30),  # FIXED
+                'end_date': pd.Timestamp(today) + pd.Timedelta(days=45),    # FIXED
+                'description': 'Scheduled maintenance - reduced capacity'
+            },
+            {
+                'facility': 'Wheatstone Gas Plant',
+                'capacity_tj_day': 180,  # Reduced from 230
+                'capacity_type': 'PIPELINE_CONSTRAINT',
+                'start_date': pd.Timestamp(today) + pd.Timedelta(days=15),  # FIXED
+                'end_date': pd.Timestamp(today) + pd.Timedelta(days=60),    # FIXED
+                'description': 'Pipeline capacity constraint'
+            }
+        ]
+        
+        return pd.DataFrame(constraints)
 
 # Initialize enhanced client
 aemo_client = EnhancedAEMOClient()
