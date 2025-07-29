@@ -441,6 +441,99 @@ def is_html_response(response_text):
     
     return False
 
+def map_facility_code_to_dashboard_name(facility_code, facility_name):
+    """Map API facility codes to dashboard facility names"""
+    
+    # Enhanced mapping based on known WA facility codes
+    facility_mapping = {
+        # Major LNG/Gas Production Facilities
+        'KARR_GP': 'Karratha Gas Plant (NWS)',
+        'GORG_GP': 'Gorgon', 
+        'WHET_GP': 'Wheatstone',
+        'PLUT_GP': 'Pluto',
+        'VARN_GP': 'Varanus Island',
+        'MCED_GP': 'Macedon',
+        'DVCR_GP': 'Devil Creek',
+        'BEHA_GP': 'Beharra Springs',
+        'WAIT_GP': 'Waitsia/Xyris',
+        'WALY_GP': 'Walyering',
+        'SCAR_GP': 'Scarborough',
+        
+        # Alternative codes that might appear
+        'NWS_KGP': 'Karratha Gas Plant (NWS)',
+        'GORGON': 'Gorgon',
+        'WHEATSTONE': 'Wheatstone',
+        'VARANUS': 'Varanus Island',
+        'MACEDON': 'Macedon'
+    }
+    
+    # Try direct facility code mapping first
+    if facility_code in facility_mapping:
+        return facility_mapping[facility_code]
+    
+    # Try fuzzy matching on facility name
+    facility_name_lower = facility_name.lower()
+    
+    name_keywords = {
+        'karratha': 'Karratha Gas Plant (NWS)',
+        'north west shelf': 'Karratha Gas Plant (NWS)',
+        'nws': 'Karratha Gas Plant (NWS)',
+        'gorgon': 'Gorgon',
+        'wheatstone': 'Wheatstone',
+        'pluto': 'Pluto',
+        'varanus': 'Varanus Island',
+        'macedon': 'Macedon',
+        'devil creek': 'Devil Creek',
+        'beharra': 'Beharra Springs',
+        'waitsia': 'Waitsia/Xyris',
+        'xyris': 'Waitsia/Xyris',
+        'walyering': 'Walyering',
+        'scarborough': 'Scarborough'
+    }
+    
+    for keyword, dashboard_name in name_keywords.items():
+        if keyword in facility_name_lower:
+            return dashboard_name
+    
+    return None
+
+def update_facility_capacities_with_api_data(capacity_df):
+    """Update WA_PRODUCTION_FACILITIES with real API capacity data"""
+    
+    updated_facilities = WA_PRODUCTION_FACILITIES.copy()
+    
+    for _, row in capacity_df.iterrows():
+        facility_name = row['dashboard_facility']
+        real_capacity = row['capacity_tj_day']
+        capacity_type = row['capacity_type']
+        
+        if facility_name in updated_facilities:
+            updated_facilities[facility_name]['max_domestic_capacity'] = real_capacity
+            updated_facilities[facility_name]['api_capacity_type'] = capacity_type
+            updated_facilities[facility_name]['capacity_source'] = 'Official AEMO API'
+            updated_facilities[facility_name]['last_updated'] = datetime.now()
+            
+            st.success(f"✅ Updated {facility_name}: {real_capacity} TJ/day ({capacity_type})")
+    
+    return updated_facilities
+
+def create_fallback_capacity_data():
+    """Create fallback capacity data when API unavailable"""
+    
+    capacity_data = []
+    for facility, config in WA_PRODUCTION_FACILITIES.items():
+        capacity_data.append({
+            'dashboard_facility': facility,
+            'facility_code': config.get('gbb_facility_code', ''),
+            'facility_name': facility,
+            'capacity_tj_day': config['max_domestic_capacity'],
+            'capacity_type': 'NAMEPLATE',
+            'description': 'GSOO 2024 Baseline',
+            'effective_date': '2024-01-01'
+        })
+    
+    return pd.DataFrame(capacity_data)
+
 def create_fallback_capacity_data_with_official_context():
     """Enhanced fallback with official AEMO context"""
     
@@ -688,7 +781,6 @@ def process_official_aemo_json(json_data):
     except Exception as e:
         st.error(f"❌ Official AEMO JSON processing failed: {e}")
         return pd.DataFrame()
-
 
 
 # ==============================================================================
