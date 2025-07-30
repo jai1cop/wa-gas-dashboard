@@ -224,8 +224,8 @@ function SupplyDemandChart({ data, activeFacilities }) {
 function MediumTermCapacityChart() {
     const { facilities } = processGanttData(facilityConstraintsData);
     
-    // This is a simplified representation. A true Gantt chart in Recharts is complex.
-    // We'll use a stacked bar chart to simulate the Gantt view.
+    # This is a simplified representation. A true Gantt chart in Recharts is complex.
+    # We'll use a stacked bar chart to simulate the Gantt view.
     const ganttData = [
         { name: 'NW Shelf', Maintenance: 45, Normal: 320, Construction: 0 },
         { name: 'Wheatstone', Maintenance: 0, Normal: 365, Construction: 0 },
