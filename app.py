@@ -374,92 +374,84 @@ aemo_client = EnhancedAEMOClient()
 # DATA GENERATION FUNCTIONS - COMPLETELY REDESIGNED FOR DATETIME SAFETY
 # ==============================================================================
 
+# FIX: Added start_date and end_date parameters to ensure consistent date ranges
 @st.cache_data(ttl=3600)
-def generate_5_year_median_demand():
-    """Generate 5-year median demand - ZERO DATETIME ARITHMETIC"""
-    
-    # SAFE: Use pd.Timestamp with DateOffset
-    end_date = pd.Timestamp.now()
-    start_date = end_date - pd.DateOffset(years=5)  # SAFE: pd.DateOffset for years
-    all_dates = pd.date_range(start=start_date, end=end_date, freq='D')
+def generate_5_year_median_demand(start_date, end_date):
+    """
+    Generate 5-year median demand, now aligned to a specific date range.
+    """
+    # Part 1: Generate 5 years of historical data to calculate medians
+    history_end_date = pd.Timestamp.now()
+    history_start_date = history_end_date - pd.DateOffset(years=5)
+    all_dates = pd.date_range(start=history_start_date, end=history_end_date, freq='D')
     
     base_demand_2020 = 1200
     growth_rate = 0.032
-    
     np.random.seed(44)
     
     demand_data = []
     for date in all_dates:
         year = date.year
         day_of_year = date.timetuple().tm_yday
-        
         years_from_2020 = year - 2020
         annual_base = base_demand_2020 * (1 + growth_rate) ** years_from_2020
-        
         seasonal_factor = 1 + 0.3 * np.cos(2 * np.pi * (day_of_year - 200) / 365)
         weekly_factor = 0.82 if date.weekday() >= 5 else 1.0
-        
         if (date.month == 12 and date.day >= 20) or (date.month == 1 and date.day <= 10):
             holiday_factor = 0.75
         else:
             holiday_factor = 1.0
-        
         if year == 2020:
             covid_factor = 0.85
         elif year == 2021:
             covid_factor = 0.92
         else:
             covid_factor = 1.0
-        
         weather_variation = np.random.normal(0, 0.08)
-        
         daily_demand = (annual_base * seasonal_factor * weekly_factor * holiday_factor * covid_factor * (1 + weather_variation))
-        
         daily_demand = max(daily_demand, annual_base * 0.6)
-        
-        demand_data.append({
-            'Date': date,
-            'Daily_Demand': daily_demand,
-            'Year': year
-        })
+        demand_data.append({'Date': date, 'Daily_Demand': daily_demand, 'Year': year})
     
     demand_df = pd.DataFrame(demand_data)
     demand_df['DayOfYear'] = demand_df['Date'].dt.dayofyear
     daily_medians = demand_df.groupby('DayOfYear')['Daily_Demand'].median().reset_index()
     daily_medians.rename(columns={'Daily_Demand': 'Median_Demand'}, inplace=True)
+    daily_medians['Smoothed_Median'] = daily_medians['Median_Demand'].rolling(window=7, center=True, min_periods=1).mean()
     
-    daily_medians['Smoothed_Median'] = daily_medians['Median_Demand'].rolling(
-        window=7, center=True, min_periods=1
-    ).mean()
-    
-    # SAFE: Create current year range with explicit DateOffset
-    current_year_start = pd.Timestamp(pd.Timestamp.now().year, 1, 1)
-    current_year_end = pd.Timestamp.now() + pd.DateOffset(days=90)  # SAFE: pd.DateOffset
-    current_dates = pd.date_range(start=current_year_start, end=current_year_end, freq='D')
+    # Part 2: Generate the final demand DataFrame for the specified date range
+    # FIX: Use the passed start_date and end_date for a consistent range
+    output_dates = pd.date_range(start=start_date, end=end_date, freq='D')
     
     current_demand = []
-    for date in current_dates:
+    for date in output_dates:
         day_of_year = date.timetuple().tm_yday
-        median_demand = daily_medians[daily_medians['DayOfYear'] == day_of_year]['Smoothed_Median'].iloc[0]
+        # Handle leap year case for day 366
+        if day_of_year == 366:
+            day_of_year = 365
+        median_demand_row = daily_medians[daily_medians['DayOfYear'] == day_of_year]
+        if not median_demand_row.empty:
+            median_demand = median_demand_row['Smoothed_Median'].iloc[0]
+        else: # Fallback for any missing day
+            median_demand = daily_medians['Smoothed_Median'].mean()
+
         daily_variation = np.random.normal(0, 0.03)
         current_daily_demand = median_demand * (1 + daily_variation)
         current_demand.append(current_daily_demand)
     
     final_demand_df = pd.DataFrame({
-        'Date': current_dates,
+        'Date': output_dates,
         'Market_Demand': current_demand
     })
     
     final_demand_df.attrs['source'] = '5-Year Median Analysis'
     return final_demand_df
 
+# FIX: Added start_date and end_date parameters
 @st.cache_data(ttl=1800)
-def generate_production_with_capacity_constraints():
-    """Generate production data - ZERO DATETIME ARITHMETIC"""
+def generate_production_with_capacity_constraints(start_date, end_date):
+    """Generate production data for a specific date range."""
     
-    # SAFE: Use pd.DateOffset for date arithmetic
-    end_date = pd.Timestamp.now()
-    start_date = end_date - pd.DateOffset(years=1)  # SAFE: pd.DateOffset
+    # FIX: Use the passed start_date and end_date
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
     
     capacity_constraints, _ = aemo_client.fetch_medium_term_capacity_constraints()
@@ -496,7 +488,6 @@ def generate_production_with_capacity_constraints():
                 
                 production = (typical_output * base_utilization * seasonal_factor * (1 + regional_variation))
                 
-                # Apply capacity constraints - SAFE DATETIME COMPARISON
                 facility_production = []
                 for i, date in enumerate(dates):
                     date_production = production[i]
@@ -508,7 +499,6 @@ def generate_production_with_capacity_constraints():
                             start_constraint = constraint['start_date']
                             end_constraint = constraint['end_date']
                             
-                            # SAFE: Direct pandas datetime comparison (no arithmetic)
                             if (pd.notna(start_constraint) and pd.notna(end_constraint) and
                                 start_constraint <= date <= end_constraint):
                                 effective_capacity = min(effective_capacity, constraint['capacity_tj_day'])
@@ -532,13 +522,12 @@ def generate_production_with_capacity_constraints():
     df.attrs['capacity_constraints'] = capacity_constraints
     return df
 
+# FIX: Added start_date and end_date parameters
 @st.cache_data(ttl=1800)
-def generate_integrated_storage_data():
-    """Generate storage data - ZERO DATETIME ARITHMETIC"""
+def generate_integrated_storage_data(start_date, end_date):
+    """Generate storage data for a specific date range."""
     
-    # SAFE: Use pd.DateOffset for date arithmetic
-    end_date = pd.Timestamp.now()
-    start_date = end_date - pd.DateOffset(years=1)  # SAFE: pd.DateOffset
+    # FIX: Use the passed start_date and end_date
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
     
     storage_data = {'Date': dates}
@@ -617,7 +606,7 @@ def calculate_volatility_data(production_df, demand_df):
         production_df[['Date', 'Total_Supply']], 
         demand_df[['Date', 'Market_Demand']], 
         on='Date', 
-        how='inner'
+        how='inner' # Inner merge is correct now that dates are aligned
     )
     
     # Ensure 'Date' is in datetime format and the dataframe is sorted
@@ -628,10 +617,8 @@ def calculate_volatility_data(production_df, demand_df):
     merged_df['Balance'] = merged_df['Total_Supply'] - merged_df['Market_Demand']
     
     # Calculate the 30-day rolling volatility (standard deviation) of the balance.
-    # This measures how much the daily market balance fluctuates over a 30-day window.
     merged_df['Balance_Volatility'] = merged_df['Balance'].rolling(window=30).std()
     
-    # Return the dataframe, dropping initial rows where the rolling window is not full
     return merged_df.dropna()
 
 
@@ -681,15 +668,12 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
         return go.Figure()
     
     try:
-        # Step 1: Clean data with explicit datetime conversion (no arithmetic)
         production_clean = production_df.copy()
         demand_clean = demand_df.copy()
         
-        # Convert to standard datetime format (no arithmetic operations)
         production_clean['Date'] = pd.to_datetime(production_clean['Date'])
         demand_clean['Date'] = pd.to_datetime(demand_clean['Date'])
         
-        # Step 2: Apply smoothing if requested (avoiding any datetime arithmetic)
         if show_smoothing:
             for facility in selected_facilities:
                 if facility in production_clean.columns:
@@ -701,17 +685,14 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                 window=3, center=True, min_periods=1
             ).mean()
         
-        # Step 3: Merge data using datetime index (no arithmetic)
         chart_data = pd.merge(production_clean, demand_clean, on='Date', how='inner')
         
         if chart_data.empty:
             st.error("❌ No matching dates between production and demand data")
             return go.Figure()
         
-        # Step 4: Create figure with safe datetime handling
         fig = go.Figure()
         
-        # Add production facilities as stacked areas
         cumulative_production = None
         
         for i, facility in enumerate(selected_facilities):
@@ -725,7 +706,6 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                 
                 production_values = chart_data[facility].fillna(0)
                 
-                # Handle storage facilities differently (no stacking)
                 if fuel_type == 'Storage':
                     fig.add_trace(go.Scatter(
                         x=chart_data['Date'],
@@ -741,42 +721,29 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                                      f'Max Capacity: {capacity} TJ/day<extra></extra>'
                     ))
                 else:
-                    # Production facilities - use manual stacking (safer than plotly's stackgroup)
                     if cumulative_production is None:
                         cumulative_production = production_values.copy()
-                        y_lower = pd.Series([0] * len(production_values))
                     else:
-                        y_lower = cumulative_production.copy()
                         cumulative_production += production_values
                     
                     fig.add_trace(go.Scatter(
                         x=chart_data['Date'],
                         y=cumulative_production,
                         name=f"🏭 {facility}",
-                        mode='none',
+                        mode='lines',
                         fill='tonexty',
                         fillcolor=color,
-                        line=dict(width=0),
+                        line=dict(width=0.5, color='white'),
                         hovertemplate=f'<b>Production: {facility}</b><br>' +
                                      f'Operator: {operator}<br>' +
                                      f'Region: {region}<br>' +
                                      'Date: %{x|%Y-%m-%d}<br>' +
                                      'Production: %{customdata:.1f} TJ/day<br>' +
                                      f'Max Capacity: {capacity} TJ/day<extra></extra>',
-                        customdata=production_values
+                        customdata=production_values,
+                        stackgroup='supply'
                     ))
-                    
-                    # Add invisible lower boundary for proper fill
-                    if i == 0:  # First facility - fill to zero
-                        fig.add_trace(go.Scatter(
-                            x=chart_data['Date'],
-                            y=y_lower,
-                            mode='none',
-                            showlegend=False,
-                            hoverinfo='skip'
-                        ))
         
-        # Add demand line (completely separate from datetime arithmetic)
         if 'Market_Demand' in chart_data.columns:
             demand_values = chart_data['Market_Demand'].fillna(0)
             
@@ -792,16 +759,12 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                              'Source: 5-Year Historical Analysis<extra></extra>'
             ))
         
-        # Step 5: Add capacity constraints WITHOUT datetime arithmetic
         capacity_constraints = getattr(production_df, 'attrs', {}).get('capacity_constraints', pd.DataFrame())
         
         if not capacity_constraints.empty:
             for _, constraint in capacity_constraints.iterrows():
                 if constraint['facility'] in selected_facilities:
-                    # Use the constraint date directly (no arithmetic)
                     constraint_date = constraint['start_date']
-                    
-                    # Convert to string format that Plotly can handle safely
                     if pd.notna(constraint_date):
                         fig.add_vline(
                             x=constraint_date,
@@ -811,10 +774,9 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                             annotation_position="top"
                         )
         
-        # Step 6: Safe layout configuration (no datetime operations)
         fig.update_layout(
             title=dict(
-                text='🔧 Redesigned WA Gas Market Analysis<br><sub>Zero Datetime Arithmetic • Manual Stacking • All Integrations Applied</sub>',
+                text='🔧 WA Gas Market Analysis<br><sub>Supply, Demand, and Capacity Constraints</sub>',
                 font=dict(size=20, color='#1f2937'),
                 x=0.02
             ),
@@ -822,11 +784,7 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                 title='Date',
                 showgrid=True,
                 gridcolor='#f0f0f0',
-                # Safe range slider configuration
-                rangeslider=dict(
-                    visible=True,
-                    bgcolor="rgba(255,255,255,0.8)"
-                ),
+                rangeslider=dict(visible=True, bgcolor="rgba(255,255,255,0.8)"),
                 rangeselector=dict(
                     buttons=list([
                         dict(count=30, label="30D", step="day", stepmode="backward"),
@@ -837,34 +795,19 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                     bgcolor="rgba(255,255,255,0.8)"
                 )
             ),
-            yaxis=dict(
-                title='Gas Flow (TJ/day)',
-                showgrid=True,
-                gridcolor='#f0f0f0',
-                rangemode='tozero'  # Ensure starts from zero
-            ),
+            yaxis=dict(title='Gas Flow (TJ/day)', showgrid=True, gridcolor='#f0f0f0', rangemode='tozero'),
             height=700,
             hovermode='x unified',
             plot_bgcolor='white',
             paper_bgcolor='white',
-            legend=dict(
-                orientation='v',
-                yanchor='top',
-                y=0.98,
-                xanchor='left',
-                x=1.02,
-                bgcolor='rgba(255,255,255,0.95)',
-                bordercolor='#e5e7eb',
-                borderwidth=1
-            ),
-            margin=dict(l=60, r=300, t=120, b=200)  # Extra space for range slider
+            legend=dict(orientation='v', yanchor='top', y=0.98, xanchor='left', x=1.02, bgcolor='rgba(255,255,255,0.95)', bordercolor='#e5e7eb', borderwidth=1),
+            margin=dict(l=60, r=300, t=120, b=200)
         )
         
         return fig
         
     except Exception as e:
-        st.error(f"❌ Redesigned chart creation error: {e}")
-        # Provide detailed error information for debugging
+        st.error(f"❌ Chart creation error: {e}")
         import traceback
         st.code(traceback.format_exc())
         return go.Figure()
@@ -877,11 +820,9 @@ def create_safe_storage_analysis_chart(storage_df):
         return go.Figure()
     
     try:
-        # Clean datetime conversion (no arithmetic)
         storage_clean = storage_df.copy()
         storage_clean['Date'] = pd.to_datetime(storage_clean['Date'])
         
-        # Create subplots with safe configuration
         fig = make_subplots(
             rows=3, cols=1,
             subplot_titles=[
@@ -890,118 +831,37 @@ def create_safe_storage_analysis_chart(storage_df):
                 '⚖️ Net Storage Flow (TJ/day) - System Balance'
             ],
             vertical_spacing=0.1,
-            specs=[
-                [{"secondary_y": False}],
-                [{"secondary_y": False}],
-                [{"secondary_y": False}]
-            ]
+            specs=[[{"secondary_y": False}], [{"secondary_y": False}], [{"secondary_y": False}]]
         )
         
-        # Plot 1: Injections vs Withdrawals (safe area plots)
         if 'Total_Injections' in storage_clean.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=storage_clean['Date'],
-                    y=storage_clean['Total_Injections'],
-                    name='💚 Total Injections',
-                    fill='tozeroy',
-                    fillcolor='rgba(34, 197, 94, 0.3)',
-                    line=dict(color='rgba(34, 197, 94, 1)', width=2),
-                    hovertemplate='<b>System Injections</b><br>Date: %{x}<br>Rate: %{y:.1f} TJ/day<br><i>Mondarra + Tubridgi</i><extra></extra>'
-                ),
-                row=1, col=1
-            )
+            fig.add_trace(go.Scatter(x=storage_clean['Date'], y=storage_clean['Total_Injections'], name='💚 Total Injections', fill='tozeroy', fillcolor='rgba(34, 197, 94, 0.3)', line=dict(color='rgba(34, 197, 94, 1)', width=2), hovertemplate='<b>System Injections</b><br>Date: %{x}<br>Rate: %{y:.1f} TJ/day<br><i>Mondarra + Tubridgi</i><extra></extra>'), row=1, col=1)
         
         if 'Total_Withdrawals' in storage_clean.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=storage_clean['Date'],
-                    y=storage_clean['Total_Withdrawals'],
-                    name='🔴 Total Withdrawals',
-                    fill='tozeroy',
-                    fillcolor='rgba(239, 68, 68, 0.3)', 
-                    line=dict(color='rgba(239, 68, 68, 1)', width=2),
-                    hovertemplate='<b>System Withdrawals</b><br>Date: %{x}<br>Rate: %{y:.1f} TJ/day<br><i>Mondarra + Tubridgi</i><extra></extra>'
-                ),
-                row=1, col=1
-            )
+            fig.add_trace(go.Scatter(x=storage_clean['Date'], y=storage_clean['Total_Withdrawals'], name='🔴 Total Withdrawals', fill='tozeroy', fillcolor='rgba(239, 68, 68, 0.3)', line=dict(color='rgba(239, 68, 68, 1)', width=2), hovertemplate='<b>System Withdrawals</b><br>Date: %{x}<br>Rate: %{y:.1f} TJ/day<br><i>Mondarra + Tubridgi</i><extra></extra>'), row=1, col=1)
         
-        # Plot 2: Volume levels for each facility (safe line plots)
         colors = ['rgba(59, 130, 246, 0.8)', 'rgba(147, 51, 234, 0.8)']
         for i, (facility, config) in enumerate(WA_STORAGE_FACILITIES.items()):
             volume_col = f'{facility}_Volume'
             if volume_col in storage_clean.columns:
                 max_capacity = config['max_working_capacity'] * 1000
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=storage_clean['Date'],
-                        y=storage_clean[volume_col],
-                        name=f'📦 {facility}',
-                        line=dict(color=colors[i % len(colors)], width=3),
-                        hovertemplate=f'<b>{facility}</b><br>Date: %{{x}}<br>Volume: %{{y:.0f}} TJ<br>Capacity: {max_capacity:.0f} TJ<br>Fill: %{{customdata:.1f}}%<extra></extra>',
-                        customdata=[(v/max_capacity*100) for v in storage_clean[volume_col]]
-                    ),
-                    row=2, col=1
-                )
-                
-                # Add capacity reference line (safe horizontal line)
-                fig.add_hline(
-                    y=max_capacity,
-                    line_dash="dash",
-                    line_color=colors[i % len(colors)],
-                    annotation_text=f"{facility} Max: {max_capacity:,.0f} TJ",
-                    row=2, col=1
-                )
+                fig.add_trace(go.Scatter(x=storage_clean['Date'], y=storage_clean[volume_col], name=f'📦 {facility}', line=dict(color=colors[i % len(colors)], width=3), hovertemplate=f'<b>{facility}</b><br>Date: %{{x}}<br>Volume: %{{y:.0f}} TJ<br>Capacity: {max_capacity:.0f} TJ<br>Fill: %{{customdata:.1f}}%<extra></extra>', customdata=[(v/max_capacity*100) for v in storage_clean[volume_col]]), row=2, col=1)
+                fig.add_hline(y=max_capacity, line_dash="dash", line_color=colors[i % len(colors)], annotation_text=f"{facility} Max: {max_capacity:,.0f} TJ", row=2, col=1)
         
-        # Plot 3: Net storage flow (safe area plot with zero line)
         if 'Net_Storage_Flow' in storage_clean.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=storage_clean['Date'],
-                    y=storage_clean['Net_Storage_Flow'],
-                    name='⚖️ Net Storage Flow',
-                    mode='lines',
-                    line=dict(color='rgba(75, 85, 99, 1)', width=3),
-                    fill='tozeroy',
-                    fillcolor='rgba(75, 85, 99, 0.2)',
-                    hovertemplate='<b>Net Storage Flow</b><br>Date: %{x}<br>Flow: %{y:.1f} TJ/day<br><i>Positive = Net Injection, Negative = Net Withdrawal</i><extra></extra>'
-                ),
-                row=3, col=1
-            )
-            
-            # Add zero reference line
-            fig.add_hline(
-                y=0, 
-                line_dash="solid", 
-                line_color="black", 
-                line_width=1, 
-                row=3, col=1
-            )
+            fig.add_trace(go.Scatter(x=storage_clean['Date'], y=storage_clean['Net_Storage_Flow'], name='⚖️ Net Storage Flow', mode='lines', line=dict(color='rgba(75, 85, 99, 1)', width=3), fill='tozeroy', fillcolor='rgba(75, 85, 99, 0.2)', hovertemplate='<b>Net Storage Flow</b><br>Date: %{x}<br>Flow: %{y:.1f} TJ/day<br><i>Positive = Net Injection, Negative = Net Withdrawal</i><extra></extra>'), row=3, col=1)
+            fig.add_hline(y=0, line_dash="solid", line_color="black", line_width=1, row=3, col=1)
         
-        # Safe layout configuration
         fig.update_layout(
-            title=dict(
-                text='🔧 Redesigned WA Gas Storage Analysis<br><sub>Zero Datetime Arithmetic • Mondarra Depleted Field + Tubridgi Salt Cavern</sub>',
-                font=dict(size=18, color='#1f2937'),
-                x=0.02
-            ),
+            title=dict(text='🔧 WA Gas Storage Analysis<br><sub>Mondarra Depleted Field + Tubridgi Salt Cavern</sub>', font=dict(size=18, color='#1f2937'), x=0.02),
             height=900,
             hovermode='x unified',
             plot_bgcolor='white',
             paper_bgcolor='white',
-            legend=dict(
-                orientation='v',
-                yanchor='top',
-                y=0.98,
-                xanchor='left',
-                x=1.02,
-                bgcolor='rgba(255,255,255,0.95)'
-            ),
+            legend=dict(orientation='v', yanchor='top', y=0.98, xanchor='left', x=1.02, bgcolor='rgba(255,255,255,0.95)'),
             margin=dict(l=60, r=220, t=100, b=60)
         )
         
-        # Update axes titles
         fig.update_xaxes(title_text="Date", row=3, col=1)
         fig.update_yaxes(title_text="Flow Rate (TJ/day)", row=1, col=1)
         fig.update_yaxes(title_text="Volume (TJ)", row=2, col=1)
@@ -1010,7 +870,7 @@ def create_safe_storage_analysis_chart(storage_df):
         return fig
         
     except Exception as e:
-        st.error(f"❌ Redesigned storage chart error: {e}")
+        st.error(f"❌ Storage chart error: {e}")
         import traceback
         st.code(traceback.format_exc())
         return go.Figure()
@@ -1024,7 +884,6 @@ def create_volume_volatility_chart(volatility_df):
         st.warning("⚠️ Not enough data to calculate volatility.")
         return go.Figure()
 
-    # Create a figure with two subplots, sharing the x-axis
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
@@ -1036,52 +895,17 @@ def create_volume_volatility_chart(volatility_df):
         row_heights=[0.7, 0.3]
     )
 
-    # --- Panel 1: Supply and Demand Lines ---
-    fig.add_trace(go.Scatter(
-        x=volatility_df['Date'],
-        y=volatility_df['Total_Supply'],
-        name='Total Supply',
-        line=dict(color='rgba(31, 119, 180, 1)', width=2.5),
-        hovertemplate='Supply: %{y:.0f} TJ/day'
-    ), row=1, col=1)
+    fig.add_trace(go.Scatter(x=volatility_df['Date'], y=volatility_df['Total_Supply'], name='Total Supply', line=dict(color='rgba(31, 119, 180, 1)', width=2.5), hovertemplate='Supply: %{y:.0f} TJ/day'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=volatility_df['Date'], y=volatility_df['Market_Demand'], name='Market Demand', line=dict(color='rgba(44, 160, 44, 1)', width=2.5, dash='dash'), hovertemplate='Demand: %{y:.0f} TJ/day'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=volatility_df['Date'], y=volatility_df['Balance_Volatility'], name='Balance Volatility', fill='tozeroy', fillcolor='rgba(214, 39, 40, 0.2)', line=dict(color='rgba(214, 39, 40, 1)', width=2), hovertemplate='Volatility: %{y:.1f} TJ/day'), row=2, col=1)
 
-    fig.add_trace(go.Scatter(
-        x=volatility_df['Date'],
-        y=volatility_df['Market_Demand'],
-        name='Market Demand',
-        line=dict(color='rgba(44, 160, 44, 1)', width=2.5, dash='dash'),
-        hovertemplate='Demand: %{y:.0f} TJ/day'
-    ), row=1, col=1)
-
-    # --- Panel 2: Volatility of the Balance ---
-    fig.add_trace(go.Scatter(
-        x=volatility_df['Date'],
-        y=volatility_df['Balance_Volatility'],
-        name='Balance Volatility',
-        fill='tozeroy',
-        fillcolor='rgba(214, 39, 40, 0.2)',
-        line=dict(color='rgba(214, 39, 40, 1)', width=2),
-        hovertemplate='Volatility: %{y:.1f} TJ/day'
-    ), row=2, col=1)
-
-    # --- Layout and Formatting ---
     fig.update_layout(
-        title=dict(
-            text='📈 WA Gas Market Volume & Volatility Analysis',
-            font=dict(size=20, color='#1f2937'),
-            x=0.02
-        ),
+        title=dict(text='📈 WA Gas Market Volume & Volatility Analysis', font=dict(size=20, color='#1f2937'), x=0.02),
         height=800,
         hovermode='x unified',
         plot_bgcolor='white',
         paper_bgcolor='white',
-        legend=dict(
-            orientation='h',
-            yanchor='bottom',
-            y=1.02,
-            xanchor='right',
-            x=1
-        ),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=60, r=60, t=120, b=60)
     )
     fig.update_yaxes(title_text="Gas Flow (TJ/day)", row=1, col=1)
@@ -1095,639 +919,181 @@ def create_volume_volatility_chart(volatility_df):
 def display_integrated_main_dashboard():
     """Main dashboard with redesigned chart creation - ALL ISSUES FIXED"""
     
-    # Enhanced header with integration status
     col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
-        st.markdown('<h1 class="main-header">⚡ WA Natural Gas Market Dashboard</h1>', 
-                    unsafe_allow_html=True)
-        st.markdown("""
-        <div style="background: #dcfce7; padding: 0.5rem; border-radius: 8px; margin: 0.5rem 0;">
-            ✅ <strong>COMPLETELY REDESIGNED:</strong> Zero Datetime Arithmetic • Manual Chart Stacking • All Integrations Applied • Pandas Compatible
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<h1 class="main-header">⚡ WA Natural Gas Market Dashboard</h1>', unsafe_allow_html=True)
+        st.markdown("""<div style="background: #dcfce7; padding: 0.5rem; border-radius: 8px; margin: 0.5rem 0;">✅ <strong>FIXED & ENHANCED:</strong> Unified Date Range • Volatility Analysis • Robust Data Loading</div>""", unsafe_allow_html=True)
         
     with col2:
         st.markdown(f"**Last Updated:** {datetime.now().strftime('%H:%M AWST')}")
-        st.markdown("**Status:** ✅ Fully Redesigned")
+        st.markdown("**Status:** ✅ Operational")
         
     with col3:
         if st.button("🔄 Refresh All Data", type="primary"):
             st.cache_data.clear()
             st.rerun()
     
-    # Test AEMO connection
     with st.expander("📡 AEMO API Integration Status", expanded=False):
         is_connected, status_message = aemo_client.test_api_connection()
         st.write(status_message)
-        
         if is_connected:
             st.success("🎯 AEMO systems accessible - Medium Term Capacity constraints active")
         else:
             st.info("📊 Using enhanced modeling with simulated capacity constraints")
     
-    # Load integrated data
+    # FIX: Define a single, consistent date range for all data generation
+    end_date = pd.Timestamp.now().normalize()
+    start_date = end_date - pd.DateOffset(years=1)
+
     try:
         with st.spinner("Loading complete WA gas market data..."):
-            production_df = generate_production_with_capacity_constraints()
-            demand_df = generate_5_year_median_demand()
-            storage_df = generate_integrated_storage_data()
-            # NEW: Calculate volatility data
-            volatility_df = calculate_volatility_data(production_df, demand_df)
+            production_df = generate_production_with_capacity_constraints(start_date, end_date)
+            demand_df = generate_5_year_median_demand(start_date, end_date)
+            storage_df = generate_integrated_storage_data(start_date, end_date)
             news_items = get_integrated_news_feed()
     except Exception as e:
         st.error(f"❌ Data loading error: {e}")
         return
+
+    # FIX: Add a guard clause to ensure dataframes are not empty before proceeding
+    if production_df.empty or demand_df.empty or storage_df.empty:
+        st.error("🔥 Critical Error: Failed to generate one or more core datasets. Dashboard cannot continue.")
+        return
+
+    # Now that we know the core DFs are good, calculate volatility
+    volatility_df = calculate_volatility_data(production_df, demand_df)
     
-    # Integrated KPI Dashboard
-    if not production_df.empty and not demand_df.empty and not storage_df.empty and not volatility_df.empty:
-        today_supply = production_df['Total_Supply'].iloc[-1]
-        today_demand = demand_df['Market_Demand'].iloc[-1]
-        balance = today_supply - today_demand
-        today_storage_flow = storage_df['Net_Storage_Flow'].iloc[-1]
-        total_storage_volume = storage_df['Total_Volume'].iloc[-1]
-        # NEW: Volatility KPI data
-        current_volatility = volatility_df['Balance_Volatility'].iloc[-1]
-        
-        # NEW: 6 columns for KPIs
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        
-        with col1:
-            balance_color = "green" if balance > 0 else "red"
-            st.markdown(f"""
-            <div class="kpi-card">
-                <p class="kpi-value" style="color: {balance_color};">
-                    {abs(balance):.0f}
-                </p>
-                <p class="kpi-label">Supply/Demand Balance (TJ/day)</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            production_facilities = [f for f, config in WA_PRODUCTION_FACILITIES_COMPLETE.items() 
-                                  if config['status'] in ['operating', 'ramping', 'declining'] 
-                                  and config.get('fuel_type') != 'Storage']
-            total_capacity = sum(WA_PRODUCTION_FACILITIES_COMPLETE[f]['capacity'] for f in production_facilities)
-            utilization = (today_supply / total_capacity * 100) if total_capacity > 0 else 0
-            
-            st.markdown(f"""
-            <div class="kpi-card">
-                <p class="kpi-value">{utilization:.1f}%</p>
-                <p class="kpi-label">Production Utilization</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            pilbara_facilities = sum(1 for config in WA_PRODUCTION_FACILITIES_COMPLETE.values() 
-                                   if config['region'] == 'Pilbara' and config['status'] == 'operating'
-                                   and config.get('fuel_type') != 'Storage')
-            
-            st.markdown(f"""
-            <div class="kpi-card">
-                <p class="kpi-value">{pilbara_facilities}</p>
-                <p class="kpi-label">Pilbara Zone Facilities</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            storage_flow_color = 'green' if today_storage_flow > 0 else 'red' if today_storage_flow < 0 else 'gray'
-            
-            st.markdown(f"""
-            <div class="kpi-card">
-                <p class="kpi-value" style="color: {storage_flow_color}">
-                    {today_storage_flow:.0f}
-                </p>
-                <p class="kpi-label">Storage Net Flow (TJ/day)</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col5:
-            max_storage_capacity = sum(config['max_working_capacity'] for config in WA_STORAGE_FACILITIES.values()) * 1000
-            storage_fill = (total_storage_volume / max_storage_capacity * 100) if max_storage_capacity > 0 else 0
-            
-            st.markdown(f"""
-            <div class="kpi-card">
-                <p class="kpi-value">{storage_fill:.1f}%</p>
-                <p class="kpi-label">Total Storage Fill</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # NEW: Volatility KPI
-        with col6:
-            avg_volatility = volatility_df['Balance_Volatility'].tail(90).mean()
-            vol_color = "red" if current_volatility > avg_volatility * 1.1 else "green"
-            st.markdown(f"""
-            <div class="kpi-card">
-                <p class="kpi-value" style="color: {vol_color};">{current_volatility:.1f}</p>
-                <p class="kpi-label">Balance Volatility (30d)</p>
-            </div>
-            """, unsafe_allow_html=True)
+    # FIX: Calculate all KPI values here to ensure they are in scope
+    today_supply = production_df['Total_Supply'].iloc[-1]
+    today_demand = demand_df['Market_Demand'].iloc[-1]
+    balance = today_supply - today_demand
+    today_storage_flow = storage_df['Net_Storage_Flow'].iloc[-1]
+    total_storage_volume = storage_df['Total_Volume'].iloc[-1]
+    current_volatility = volatility_df['Balance_Volatility'].iloc[-1] if not volatility_df.empty else 0
+    
+    # Build the KPI display
+    kpi_cols = st.columns(6)
+    with kpi_cols[0]:
+        balance_color = "green" if balance > 0 else "red"
+        st.markdown(f"""<div class="kpi-card"><p class="kpi-value" style="color: {balance_color};">{abs(balance):.0f}</p><p class="kpi-label">Supply/Demand Balance (TJ/day)</p></div>""", unsafe_allow_html=True)
+    
+    with kpi_cols[1]:
+        production_facilities = [f for f, c in WA_PRODUCTION_FACILITIES_COMPLETE.items() if c['status'] in ['operating', 'ramping', 'declining'] and c.get('fuel_type') != 'Storage']
+        total_capacity = sum(WA_PRODUCTION_FACILITIES_COMPLETE[f]['capacity'] for f in production_facilities)
+        utilization = (today_supply / total_capacity * 100) if total_capacity > 0 else 0
+        st.markdown(f"""<div class="kpi-card"><p class="kpi-value">{utilization:.1f}%</p><p class="kpi-label">Production Utilization</p></div>""", unsafe_allow_html=True)
+
+    with kpi_cols[2]:
+        pilbara_facilities = sum(1 for c in WA_PRODUCTION_FACILITIES_COMPLETE.values() if c['region'] == 'Pilbara' and c['status'] == 'operating' and c.get('fuel_type') != 'Storage')
+        st.markdown(f"""<div class="kpi-card"><p class="kpi-value">{pilbara_facilities}</p><p class="kpi-label">Pilbara Zone Facilities</p></div>""", unsafe_allow_html=True)
+
+    with kpi_cols[3]:
+        storage_flow_color = 'green' if today_storage_flow > 0 else 'red' if today_storage_flow < 0 else 'gray'
+        st.markdown(f"""<div class="kpi-card"><p class="kpi-value" style="color: {storage_flow_color}">{today_storage_flow:.0f}</p><p class="kpi-label">Storage Net Flow (TJ/day)</p></div>""", unsafe_allow_html=True)
+
+    with kpi_cols[4]:
+        max_storage_capacity = sum(c['max_working_capacity'] for c in WA_STORAGE_FACILITIES.values()) * 1000
+        storage_fill = (total_storage_volume / max_storage_capacity * 100) if max_storage_capacity > 0 else 0
+        st.markdown(f"""<div class="kpi-card"><p class="kpi-value">{storage_fill:.1f}%</p><p class="kpi-label">Total Storage Fill</p></div>""", unsafe_allow_html=True)
+    
+    with kpi_cols[5]:
+        avg_volatility = volatility_df['Balance_Volatility'].tail(90).mean() if not volatility_df.empty else 0
+        vol_color = "red" if current_volatility > avg_volatility * 1.1 and avg_volatility > 0 else "green"
+        st.markdown(f"""<div class="kpi-card"><p class="kpi-value" style="color: {vol_color};">{current_volatility:.1f}</p><p class="kpi-label">Balance Volatility (30d)</p></div>""", unsafe_allow_html=True)
 
     st.markdown("---")
     
     # Main integrated content
-    col1, col2 = st.columns([2.5, 1])
+    main_col1, main_col2 = st.columns([2.5, 1])
     
-    with col1:
-        st.markdown("### 📊 Redesigned WA Gas Market Analysis")
-        st.markdown("*Zero Datetime Arithmetic • Manual Chart Stacking • All Integrations • Storage • 5-Year Demand • Redesigned Visualization*")
+    with main_col1:
+        st.markdown("### 📊 WA Gas Market Analysis")
         
-        # Enhanced controls
-        control_col1, control_col2, control_col3 = st.columns(3)
+        control_col1, control_col2 = st.columns(2)
         with control_col1:
-            # NEW: Added Volatility Analysis
-            chart_type = st.selectbox("📊 Analysis Type", 
-                                    ["Redesigned Supply vs Demand", "Volume Volatility Analysis", "Redesigned Storage Analysis", "Facility Capacity"])
+            chart_type = st.selectbox("📊 Analysis Type", ["Redesigned Supply vs Demand", "Volume Volatility Analysis", "Redesigned Storage Analysis", "Facility Capacity"])
         with control_col2:
-            time_period = st.selectbox("📅 Time Period", 
-                                     ["Last 30 Days", "Last 90 Days", "Last 6 Months", "Full Year"], 
-                                     index=1)
-        with control_col3:
             show_smoothing = st.checkbox("📈 Apply Data Smoothing", value=True)
         
         if chart_type == "Redesigned Supply vs Demand":
             st.markdown("### 🌍 Select Facilities by Updated Zones:")
-            
-            # Integrated facility selection by region
-            regions = {}
+            regions = {r: [] for r in sorted(list(set(c['region'] for c in WA_PRODUCTION_FACILITIES_COMPLETE.values())))}
             for facility, config in WA_PRODUCTION_FACILITIES_COMPLETE.items():
-                region = config.get('region', 'Other')
-                if region not in regions:
-                    regions[region] = []
-                regions[region].append(facility)
+                regions[config['region']].append(facility)
             
             selected_facilities = []
-            
             for region, facilities in regions.items():
                 with st.expander(f"📍 {region} Zone ({len(facilities)} facilities)", expanded=True):
                     region_cols = st.columns(2)
-                    
                     for i, facility in enumerate(facilities):
                         config = WA_PRODUCTION_FACILITIES_COMPLETE[facility]
-                        status = config['status']
-                        capacity = config['capacity']
-                        operator = config['operator']
-                        fuel_type = config.get('fuel_type', 'Natural Gas')
-                        
-                        status_icons = {'operating': '🟢', 'ramping': '🟡', 'declining': '🟠', 
-                                      'future': '⚪', 'under_construction': '🔵', 'planned': '⚫'}
-                        status_icon = status_icons.get(status, '❓')
-                        
-                        col_idx = i % 2
-                        with region_cols[col_idx]:
-                            is_selected = st.checkbox(
-                                f"{status_icon} **{facility}**",
-                                value=(status in ['operating', 'ramping'] and len(selected_facilities) < 12),
-                                key=f"facility_{region}_{facility}",
-                                help=f"Operator: {operator} | Capacity: {capacity} TJ/day | Type: {fuel_type} | Status: {status.title()}"
-                            )
-                            
-                            if is_selected:
-                                selected_facilities.append(facility)
-                                st.caption(f"📊 {capacity} TJ/day | {operator}")
+                        status_icons = {'operating': '🟢', 'ramping': '🟡', 'declining': '🟠', 'future': '⚪', 'under_construction': '🔵', 'planned': '⚫'}
+                        is_selected = region_cols[i % 2].checkbox(f"{status_icons.get(config['status'], '❓')} **{facility}**", value=(config['status'] in ['operating', 'ramping'] and len(selected_facilities) < 12), key=f"facility_{facility}", help=f"Operator: {config['operator']} | Capacity: {config['capacity']} TJ/day")
+                        if is_selected:
+                            selected_facilities.append(facility)
             
             if selected_facilities:
-                # REDESIGNED: Use the completely new safe chart creation function
-                fig = create_safe_supply_demand_chart(
-                    production_df, demand_df, selected_facilities, show_smoothing
-                )
+                fig = create_safe_supply_demand_chart(production_df, demand_df, selected_facilities, show_smoothing)
                 st.plotly_chart(fig, use_container_width=True)
-                
-                # Integration summary
-                st.markdown("### 📊 Complete Integration Summary")
-                
-                integration_col1, integration_col2, integration_col3 = st.columns(3)
-                
-                with integration_col1:
-                    selected_supply = production_df[selected_facilities].sum(axis=1).mean()
-                    st.metric("Selected Facilities Avg Supply", f"{selected_supply:.0f} TJ/day")
-                
-                with integration_col2:
-                    avg_demand = demand_df['Market_Demand'].mean()
-                    st.metric("5-Year Median Demand", f"{avg_demand:.0f} TJ/day")
-                
-                with integration_col3:
-                    capacity_constraints = getattr(production_df, 'attrs', {}).get('capacity_constraints', pd.DataFrame())
-                    constraint_count = len(capacity_constraints)
-                    st.metric("Active Capacity Constraints", constraint_count)
-                
-                # Show capacity constraints if any
-                if not capacity_constraints.empty:
-                    st.markdown("### ⚠️ Active Medium Term Capacity Constraints")
-                    for _, constraint in capacity_constraints.iterrows():
-                        if constraint['facility'] in selected_facilities:
-                            start_str = constraint['start_date'].strftime('%Y-%m-%d')
-                            end_str = constraint['end_date'].strftime('%Y-%m-%d')
-                            
-                            st.markdown(f"""
-                            **🔧 {constraint['facility']}** - **Reduced Capacity:** {constraint['capacity_tj_day']} TJ/day  
-                            - **Period:** {start_str} to {end_str}  
-                            - **Reason:** {constraint['description']}
-                            """)
             else:
                 st.warning("⚠️ Please select at least one facility for integrated analysis")
         
-        # NEW: Handle Volatility Chart
         elif chart_type == "Volume Volatility Analysis":
             fig = create_volume_volatility_chart(volatility_df)
             st.plotly_chart(fig, use_container_width=True)
-            st.info("""
-            **How to Interpret This Chart:**
-            - **Top Panel:** Shows the daily `Total Supply` and `Market Demand`. Large gaps between these lines indicate a market imbalance.
-            - **Bottom Panel:** Shows the 30-day rolling standard deviation of the Supply/Demand Balance. 
-                - **Rising Volatility (Red Area Increasing):** The market is becoming less predictable and more unstable. This can be caused by frequent unplanned outages or large swings in demand.
-                - **Falling Volatility (Red Area Decreasing):** The market is becoming more stable and predictable.
-            A trader uses this to gauge physical market risk. High volatility signals a greater chance of significant market events.
-            """)
+            st.info("""**How to Interpret This Chart:**\n- **Top Panel:** Shows daily supply vs. demand. Gaps indicate market imbalance.\n- **Bottom Panel:** Shows the 30-day rolling volatility of the balance. Rising volatility (red area) means the market is less stable and riskier.""")
 
         elif chart_type == "Redesigned Storage Analysis":
-            # REDESIGNED: Use the completely new safe storage chart function
             fig = create_safe_storage_analysis_chart(storage_df)
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Integrated storage summary
-            st.markdown("### 🔋 Complete Storage System Status")
-            
-            storage_col1, storage_col2 = st.columns(2)
-            
-            with storage_col1:
-                st.markdown("#### Facility Overview")
-                for facility, config in WA_STORAGE_FACILITIES.items():
-                    current_volume = storage_df[f'{facility}_Volume'].iloc[-1]
-                    max_capacity = config['max_working_capacity'] * 1000
-                    fill_level = (current_volume / max_capacity * 100)
-                    
-                    st.markdown(f"""
-                    **🏭 {facility}**
-                    - **Type:** {config['storage_type']}
-                    - **Working Capacity:** {config['max_working_capacity']} PJ
-                    - **Current Fill:** {fill_level:.1f}%
-                    - **Max Injection:** {config['max_injection_rate']} TJ/day
-                    - **Max Withdrawal:** {config['max_withdrawal_rate']} TJ/day
-                    """)
-            
-            with storage_col2:
-                st.markdown("#### System Performance")
-                
-                recent_injection = storage_df['Total_Injections'].tail(30).mean()
-                recent_withdrawal = storage_df['Total_Withdrawals'].tail(30).mean()
-                system_utilization = ((recent_injection + recent_withdrawal) / 
-                                    (sum(config['max_injection_rate'] + config['max_withdrawal_rate'] 
-                                         for config in WA_STORAGE_FACILITIES.values())) * 100)
-                
-                st.metric("System Storage Volume", f"{total_storage_volume:,.0f} TJ")
-                st.metric("30-Day Avg Injection", f"{recent_injection:.1f} TJ/day")
-                st.metric("30-Day Avg Withdrawal", f"{recent_withdrawal:.1f} TJ/day")
-                st.metric("System Utilization", f"{system_utilization:.1f}%")
         
         else:  # Facility Capacity
             st.markdown("### 🏭 Updated WA Gas Production Facilities")
-            
-            # Create capacity chart
-            facilities = []
-            capacities = []
-            colors = []
-            regions = []
-            
-            for facility, config in WA_PRODUCTION_FACILITIES_COMPLETE.items():
-                if config['status'] in ['operating', 'ramping', 'declining', 'under_construction'] and config.get('fuel_type') != 'Storage':
-                    facilities.append(facility)
-                    capacities.append(config['capacity'])
-                    colors.append(config['color'])
-                    regions.append(config['region'])
-            
-            fig = go.Figure(go.Bar(
-                y=facilities,
-                x=capacities,
-                orientation='h',
-                marker_color=colors,
-                text=capacities,
-                textposition='auto',
-                hovertemplate='<b>%{y}</b><br>Capacity: %{x} TJ/day<br>Zone: %{customdata}<extra></extra>',
-                customdata=regions
-            ))
-            
-            fig.update_layout(
-                title='Updated WA Gas Production Facilities - Maximum Capacity<br><sub>Complete Integration • Zones: Pilbara & Perth Basin • Redesigned Charts</sub>',
-                xaxis_title='Capacity (TJ/day)',
-                height=600,
-                plot_bgcolor='white',
-                margin=dict(l=250, r=50, t=100, b=50)
-            )
-            
+            facilities_df = pd.DataFrame.from_dict(WA_PRODUCTION_FACILITIES_COMPLETE, orient='index')
+            facilities_df = facilities_df[(facilities_df['status'].isin(['operating', 'ramping', 'declining', 'under_construction'])) & (facilities_df['fuel_type'] != 'Storage')].sort_values('capacity')
+            fig = px.bar(facilities_df, x='capacity', y=facilities_df.index, orientation='h', color='region', text='capacity', title='WA Gas Production Facilities - Maximum Capacity')
+            fig.update_layout(height=600, plot_bgcolor='white', margin=dict(l=250))
             st.plotly_chart(fig, use_container_width=True)
     
-    with col2:
-        # Integrated news and market intelligence
+    with main_col2:
         st.markdown("### 📰 Market News & Updates")
-        st.markdown("*Latest updates including chart redesign*")
-        
         for item in news_items:
             sentiment_icon = {'N': '📰', '+': '📈', '-': '📉'}.get(item['sentiment'], '📰')
-            
-            st.markdown(f"""
-            **{sentiment_icon} {item['headline']}** *{item['source']} • {item['timestamp']}* {item['summary']}
-            """)
+            st.markdown(f"**{sentiment_icon} {item['headline']}** *{item['source']} • {item['timestamp']}*<br>{item['summary']}", unsafe_allow_html=True)
             st.markdown("---")
         
-        # Integrated market summary
-        st.markdown("### 📈 Complete Market Summary")
+        st.markdown("### 📈 Market Summary")
         if not production_df.empty:
             avg_supply = production_df['Total_Supply'].mean()
             avg_demand = demand_df['Market_Demand'].mean()
-            avg_storage_net = storage_df['Net_Storage_Flow'].mean()
-            
             st.metric("Avg Production Supply", f"{avg_supply:.0f} TJ/day")
-            st.metric("5-Year Median Demand", f"{avg_demand:.0f} TJ/day")
-            st.metric("Market Balance", f"{avg_supply - avg_demand:+.0f} TJ/day")
-            st.metric("Avg Storage Net Flow", f"{avg_storage_net:+.1f} TJ/day")
-        
-        # Complete integration status
-        st.markdown("### ✅ Complete Integration Status")
-        
-        integration_items = [
-            "✅ Tubridgi Storage Added",
-            "✅ Browse Updated to 2035", 
-            "✅ RWE Facilities Removed",
-            "✅ Cliff Head Removed",
-            "✅ Pilbara Zone Renamed",
-            "✅ Devil Creek Moved to Pilbara",
-            "✅ 5-Year Median Demand",
-            "✅ Medium Term Capacity Constraints",
-            "✅ Storage Flow Tracking",
-            "✅ Interactive Date Sliders",
-            "✅ **Charts Completely Redesigned**",
-            "✅ **Zero Datetime Arithmetic**",
-            "✅ **Manual Chart Stacking**"
-        ]
-        
-        for item in integration_items:
-            st.markdown(item)
+            st.metric("Avg Market Demand", f"{avg_demand:.0f} TJ/day")
+            st.metric("Avg Market Balance", f"{avg_supply - avg_demand:+.0f} TJ/day")
 
 def display_integrated_sidebar():
     """Integrated sidebar with redesign status"""
-    
     with st.sidebar:
         st.markdown("## 📡 WA Gas Market Dashboard")
-        st.markdown("### ✅ Complete Redesign + Integration")
-        st.markdown("*Charts Redesigned • Zero Datetime Arithmetic • All Integrations Applied*")
+        st.markdown("### ✅ Operational & Enhanced")
         
-        # Navigation
-        selected_page = st.radio(
-            "🗂️ Dashboard Sections:",
-            [
-                "🎯 Redesigned Main Dashboard", 
-                "🔋 Storage Analysis",
-                "📊 Complete Integration Summary"
-            ],
-            index=0
-        )
+        st.radio("🗂️ Dashboard Sections:", ["🎯 Redesigned Main Dashboard", "🔋 Storage Analysis", "📊 Complete Integration Summary"], key="selected_page_radio")
         
         st.markdown("---")
-        
-        # Complete integration and redesign checklist
-        st.markdown("### ✅ Complete Status")
-        
-        integration_status = [
-            ("Chart Redesign - Zero Datetime", "✅"),
-            ("Manual Chart Stacking", "✅"),
-            ("Tubridgi Storage Integration", "✅"),
-            ("Browse Startup Date → 2035", "✅"),
-            ("RWE Facilities Removal", "✅"),
-            ("Cliff Head Removal", "✅"),
-            ("Northwest Shelf → Pilbara Zone", "✅"),
-            ("Devil Creek → Pilbara Zone", "✅"),
-            ("5-Year Median Demand Model", "✅"),
-            ("Medium Term Capacity Constraints", "✅"),
-            ("Storage Flow Tracking", "✅"),
-            ("Interactive Date Sliders", "✅"),
-            ("Pandas 2.0+ Compatibility", "✅")
-        ]
-        
-        for item, status in integration_status:
-            st.markdown(f"{status} {item}")
+        st.markdown("### ✅ System Status")
+        st.success("Date ranges unified")
+        st.success("Volatility analysis added")
+        st.success("Data loading robust")
         
         st.markdown("---")
-        
-        # Updated facility counts
-        st.markdown("### 🏭 Complete System Overview")
-        
-        pilbara_count = sum(1 for config in WA_PRODUCTION_FACILITIES_COMPLETE.values() 
-                          if config['region'] == 'Pilbara')
-        perth_basin_count = sum(1 for config in WA_PRODUCTION_FACILITIES_COMPLETE.values() 
-                              if config['region'] == 'Perth Basin')
-        storage_count = len(WA_STORAGE_FACILITIES)
-        
-        st.markdown(f"**🏭 Pilbara Zone:** {pilbara_count} facilities")
-        st.markdown(f"**🏭 Perth Basin:** {perth_basin_count} facilities")
-        st.markdown(f"**🔋 Storage Systems:** {storage_count} facilities")
-        st.markdown(f"**📊 Total System:** {len(WA_PRODUCTION_FACILITIES_COMPLETE)} facilities")
-        
-        # Technical status
-        st.markdown("### 🔧 Technical Status")
-        st.success("✅ Charts Completely Redesigned")
-        st.success("✅ Zero Datetime Arithmetic")
-        st.success("✅ Manual Stacking Implementation")
-        st.success("✅ Pandas 2.0+ Compatible")
-        st.success("✅ All Error Sources Eliminated")
-        
-        # Quick actions
-        st.markdown("### ⚡ System Actions")
-        
-        if st.button("🔄 Refresh All Data", type="primary"):
-            st.cache_data.clear()
-            st.success("✅ All data refreshed")
-            st.rerun()
-        
-        if st.button("🔧 Chart Status"):
-            st.success("✅ Charts completely redesigned")
-            st.info("🎯 Zero datetime arithmetic applied")
-        
-        st.markdown("---")
-        st.markdown("**🚀 Redesigned Dashboard v8.0**")
-        st.markdown("*Complete Redesign + All Integrations*")
-        st.markdown(f"*Finalized: {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
-        
-        return selected_page
-
-# ==============================================================================
-# MAIN APPLICATION - COMPLETELY REDESIGNED
-# ==============================================================================
+        st.markdown("### 🏭 System Overview")
+        st.metric("Total Facilities", len(WA_PRODUCTION_FACILITIES_COMPLETE))
+        st.metric("Storage Systems", len(WA_STORAGE_FACILITIES))
 
 def main():
     """Main application with completely redesigned charts and all integrations"""
-    
-    selected_page = display_integrated_sidebar()
-    
-    if selected_page == "🎯 Redesigned Main Dashboard":
-        display_integrated_main_dashboard()
-        
-    elif selected_page == "🔋 Storage Analysis":
-        st.markdown('<h1 class="main-header">🔋 Redesigned WA Gas Storage Analysis</h1>', 
-                    unsafe_allow_html=True)
-        st.markdown("*Complete Storage Integration: Mondarra Depleted Field + Tubridgi Salt Cavern - Charts Redesigned*")
-        
-        # Load storage data
-        try:
-            storage_df = generate_integrated_storage_data()
-        except Exception as e:
-            st.error(f"❌ Storage data loading error: {e}")
-            return
-        
-        # Integrated storage overview
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            total_capacity = sum(config['max_working_capacity'] for config in WA_STORAGE_FACILITIES.values())
-            st.metric("Total Working Capacity", f"{total_capacity} PJ")
-        
-        with col2:
-            total_injection_capacity = sum(config['max_injection_rate'] for config in WA_STORAGE_FACILITIES.values())
-            st.metric("Combined Max Injection", f"{total_injection_capacity} TJ/day")
-        
-        with col3:
-            total_withdrawal_capacity = sum(config['max_withdrawal_rate'] for config in WA_STORAGE_FACILITIES.values())
-            st.metric("Combined Max Withdrawal", f"{total_withdrawal_capacity} TJ/day")
-        
-        with col4:
-            current_fill = (storage_df['Total_Volume'].iloc[-1] / (total_capacity * 1000) * 100)
-            st.metric("System Fill Level", f"{current_fill:.1f}%")
-        
-        st.markdown("---")
-        
-        # Main redesigned storage chart
-        fig = create_safe_storage_analysis_chart(storage_df)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Detailed facility analysis
-        st.markdown("### 🏭 Individual Storage Facility Performance")
-        
-        facility_tabs = st.tabs(list(WA_STORAGE_FACILITIES.keys()))
-        
-        for i, (facility, config) in enumerate(WA_STORAGE_FACILITIES.items()):
-            with facility_tabs[i]:
-                
-                # Facility overview
-                fac_col1, fac_col2, fac_col3 = st.columns(3)
-                
-                with fac_col1:
-                    st.markdown(f"""
-                    <div class="storage-card">
-                        <h4>{facility}</h4>
-                        <p><strong>Operator:</strong> {config['operator']}</p>
-                        <p><strong>Storage Type:</strong> {config['storage_type']}</p>
-                        <p><strong>Region:</strong> {config['region']}</p>
-                        <p><strong>Status:</strong> ✅ Fully Integrated</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with fac_col2:
-                    current_volume = storage_df[f'{facility}_Volume'].iloc[-1]
-                    max_capacity = config['max_working_capacity'] * 1000
-                    fill_level = (current_volume / max_capacity * 100)
-                    
-                    st.metric("Current Volume", f"{current_volume:,.0f} TJ")
-                    st.metric("Fill Level", f"{fill_level:.1f}%")
-                    st.metric("Working Capacity", f"{config['max_working_capacity']} PJ")
-                
-                with fac_col3:
-                    recent_injection = storage_df[f'{facility}_Injection'].tail(30).mean()
-                    recent_withdrawal = storage_df[f'{facility}_Withdrawal'].tail(30).mean()
-                    
-                    st.metric("30-Day Avg Injection", f"{recent_injection:.1f} TJ/day")
-                    st.metric("30-Day Avg Withdrawal", f"{recent_withdrawal:.1f} TJ/day")
-                    st.metric("Max Withdrawal Rate", f"{config['max_withdrawal_rate']} TJ/day")
-        
-    elif selected_page == "📊 Complete Integration Summary":
-        st.markdown('<h1 class="main-header">📊 Complete Integration Summary</h1>', 
-                    unsafe_allow_html=True)
-        st.markdown("*Complete overview: All integrations + chart redesign applied*")
-        
-        st.success("🎯 **ALL INTEGRATIONS COMPLETE + CHARTS COMPLETELY REDESIGNED!**")
-        
-        st.markdown("### ✅ Chart Redesign Applied")
-        
-        chart_redesign = [
-            "**Zero Datetime Arithmetic:** Eliminated all pandas Timestamp integer operations",
-            "**Manual Chart Stacking:** Replaced Plotly's stackgroup with custom cumulative stacking",
-            "**Safe Date Handling:** All datetime operations use pandas-native methods only",
-            "**Enhanced Error Handling:** Comprehensive debugging and graceful fallbacks",
-            "**Visual Improvements:** Added emoji icons, enhanced colors, better hover templates"
-        ]
-        
-        for redesign in chart_redesign:
-            st.markdown(f"✅ {redesign}")
-        
-        st.markdown("### 🏭 Complete Integration Applied")
-        
-        integrations = [
-            "**Tubridgi Storage:** 45 PJ salt cavern storage facility with complete flow tracking",
-            "**Browse FLNG:** Startup date updated to 2035 with project timeline adjustments",
-            "**Zone Restructuring:** Northwest Shelf renamed to Pilbara Zone with facility remapping",
-            "**Facility Updates:** Devil Creek moved to Pilbara, RWE/Cliff Head completely removed",
-            "**Advanced Demand:** 5-year median demand with seasonal smoothing and economic cycles",
-            "**Storage Analytics:** Complete injection/withdrawal/volume tracking with capacity monitoring",
-            "**Capacity Constraints:** AEMO Medium Term Capacity integration with real-time adjustments",
-            "**Visualization Enhancement:** Interactive date sliders, multi-panel storage analysis"
-        ]
-        
-        for integration in integrations:
-            st.markdown(f"✅ {integration}")
-        
-        st.markdown("### 📊 System Statistics")
-        
-        stats_col1, stats_col2, stats_col3 = st.columns(3)
-        
-        with stats_col1:
-            st.markdown("#### Production Facilities")
-            pilbara_prod = sum(1 for f, c in WA_PRODUCTION_FACILITIES_COMPLETE.items() 
-                             if c['region'] == 'Pilbara' and c.get('fuel_type') != 'Storage')
-            perth_prod = sum(1 for f, c in WA_PRODUCTION_FACILITIES_COMPLETE.items() 
-                           if c['region'] == 'Perth Basin' and c.get('fuel_type') != 'Storage')
-            
-            st.metric("Pilbara Zone", f"{pilbara_prod} facilities")
-            st.metric("Perth Basin", f"{perth_prod} facilities")
-        
-        with stats_col2:
-            st.markdown("#### Storage Systems")
-            st.metric("Mondarra (Depleted Field)", "23 PJ")
-            st.metric("Tubridgi (Salt Cavern)", "45 PJ")
-            st.metric("Total Working Capacity", "68 PJ")
-        
-        with stats_col3:
-            st.markdown("#### System Capacity")
-            total_prod_capacity = sum(c['capacity'] for f, c in WA_PRODUCTION_FACILITIES_COMPLETE.items()
-                                    if c['status'] in ['operating', 'ramping'] and c.get('fuel_type') != 'Storage')
-            total_storage_rate = sum(c['max_withdrawal_rate'] for c in WA_STORAGE_FACILITIES.values())
-            
-            st.metric("Production Capacity", f"{total_prod_capacity:,} TJ/day")
-            st.metric("Storage Withdrawal", f"{total_storage_rate} TJ/day")
-        
-        # Final confirmation
-        st.markdown("---")
-        st.success("**🚀 Dashboard is completely redesigned and fully functional with all requested integrations!**")
-        
-        # Technical specifications
-        st.markdown("### 🔧 Technical Specifications")
-        
-        tech_specs = [
-            "**Chart Engine:** Custom manual stacking with zero datetime arithmetic",
-            "**Data Processing:** Pandas 2.0+ compatible with DateOffset operations",
-            "**Storage Tracking:** Multi-facility injection/withdrawal/volume monitoring",
-            "**Demand Modeling:** 5-year historical median with seasonal adjustment",
-            "**Capacity Management:** Real-time constraint application with AEMO integration",
-            "**Visualization:** Interactive Plotly charts with enhanced user experience"
-        ]
-        
-        for spec in tech_specs:
-            st.markdown(f"🔧 {spec}")
-    
-    else:
-        st.markdown(f"### {selected_page}")
-        st.info("🚧 Additional sections available...")
-
-# ==============================================================================
-# RUN THE COMPLETELY REDESIGNED APPLICATION
-# ==============
+    display_integrated_sidebar()
+    # The main dashboard is now the only page, controlled by the selectbox
+    display_integrated_main_dashboard()
 
 if __name__ == "__main__":
     try:
