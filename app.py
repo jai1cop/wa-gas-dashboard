@@ -413,8 +413,7 @@ def generate_5_year_median_demand():
         
         weather_variation = np.random.normal(0, 0.08)
         
-        daily_demand = (annual_base * seasonal_factor * weekly_factor * 
-                       holiday_factor * covid_factor * (1 + weather_variation))
+        daily_demand = (annual_base * seasonal_factor * weekly_factor * holiday_factor * covid_factor * (1 + weather_variation))
         
         daily_demand = max(daily_demand, annual_base * 0.6)
         
@@ -495,8 +494,7 @@ def generate_production_with_capacity_constraints():
                 else:
                     regional_variation = np.random.normal(0, 0.08, len(dates))
                 
-                production = (typical_output * base_utilization * seasonal_factor * 
-                             (1 + regional_variation))
+                production = (typical_output * base_utilization * seasonal_factor * (1 + regional_variation))
                 
                 # Apply capacity constraints - SAFE DATETIME COMPARISON
                 facility_production = []
@@ -607,6 +605,35 @@ def generate_integrated_storage_data():
     df['Net_Storage_Flow'] = df['Total_Injections'] - df['Total_Withdrawals']
     
     return df
+
+@st.cache_data(ttl=1800)
+def calculate_volatility_data(production_df, demand_df):
+    """
+    NEW: Merges supply and demand data and calculates rolling volatility of the balance.
+    This is a direct measure of market stability.
+    """
+    # Merge the relevant columns from the two dataframes
+    merged_df = pd.merge(
+        production_df[['Date', 'Total_Supply']], 
+        demand_df[['Date', 'Market_Demand']], 
+        on='Date', 
+        how='inner'
+    )
+    
+    # Ensure 'Date' is in datetime format and the dataframe is sorted
+    merged_df['Date'] = pd.to_datetime(merged_df['Date'])
+    merged_df.sort_values('Date', inplace=True)
+    
+    # Calculate the daily supply/demand balance
+    merged_df['Balance'] = merged_df['Total_Supply'] - merged_df['Market_Demand']
+    
+    # Calculate the 30-day rolling volatility (standard deviation) of the balance.
+    # This measures how much the daily market balance fluctuates over a 30-day window.
+    merged_df['Balance_Volatility'] = merged_df['Balance'].rolling(window=30).std()
+    
+    # Return the dataframe, dropping initial rows where the rolling window is not full
+    return merged_df.dropna()
+
 
 @st.cache_data(ttl=3600)
 def get_integrated_news_feed():
@@ -988,6 +1015,79 @@ def create_safe_storage_analysis_chart(storage_df):
         st.code(traceback.format_exc())
         return go.Figure()
 
+def create_volume_volatility_chart(volatility_df):
+    """
+    NEW: Creates a two-panel chart for supply/demand and balance volatility.
+    This helps traders visually correlate market fundamentals with market stability.
+    """
+    if volatility_df.empty:
+        st.warning("⚠️ Not enough data to calculate volatility.")
+        return go.Figure()
+
+    # Create a figure with two subplots, sharing the x-axis
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        subplot_titles=(
+            'WA Gas Supply vs. Demand',
+            '30-Day Rolling Volatility of Supply/Demand Balance (Std. Dev. in TJ/day)'
+        ),
+        row_heights=[0.7, 0.3]
+    )
+
+    # --- Panel 1: Supply and Demand Lines ---
+    fig.add_trace(go.Scatter(
+        x=volatility_df['Date'],
+        y=volatility_df['Total_Supply'],
+        name='Total Supply',
+        line=dict(color='rgba(31, 119, 180, 1)', width=2.5),
+        hovertemplate='Supply: %{y:.0f} TJ/day'
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=volatility_df['Date'],
+        y=volatility_df['Market_Demand'],
+        name='Market Demand',
+        line=dict(color='rgba(44, 160, 44, 1)', width=2.5, dash='dash'),
+        hovertemplate='Demand: %{y:.0f} TJ/day'
+    ), row=1, col=1)
+
+    # --- Panel 2: Volatility of the Balance ---
+    fig.add_trace(go.Scatter(
+        x=volatility_df['Date'],
+        y=volatility_df['Balance_Volatility'],
+        name='Balance Volatility',
+        fill='tozeroy',
+        fillcolor='rgba(214, 39, 40, 0.2)',
+        line=dict(color='rgba(214, 39, 40, 1)', width=2),
+        hovertemplate='Volatility: %{y:.1f} TJ/day'
+    ), row=2, col=1)
+
+    # --- Layout and Formatting ---
+    fig.update_layout(
+        title=dict(
+            text='📈 WA Gas Market Volume & Volatility Analysis',
+            font=dict(size=20, color='#1f2937'),
+            x=0.02
+        ),
+        height=800,
+        hovermode='x unified',
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='right',
+            x=1
+        ),
+        margin=dict(l=60, r=60, t=120, b=60)
+    )
+    fig.update_yaxes(title_text="Gas Flow (TJ/day)", row=1, col=1)
+    fig.update_yaxes(title_text="Volatility (Std Dev)", row=2, col=1)
+    
+    return fig
 # ==============================================================================
 # MAIN DASHBOARD FUNCTIONS - WITH REDESIGNED CHARTS
 # ==============================================================================
@@ -1031,20 +1131,25 @@ def display_integrated_main_dashboard():
             production_df = generate_production_with_capacity_constraints()
             demand_df = generate_5_year_median_demand()
             storage_df = generate_integrated_storage_data()
+            # NEW: Calculate volatility data
+            volatility_df = calculate_volatility_data(production_df, demand_df)
             news_items = get_integrated_news_feed()
     except Exception as e:
         st.error(f"❌ Data loading error: {e}")
         return
     
     # Integrated KPI Dashboard
-    if not production_df.empty and not demand_df.empty and not storage_df.empty:
+    if not production_df.empty and not demand_df.empty and not storage_df.empty and not volatility_df.empty:
         today_supply = production_df['Total_Supply'].iloc[-1]
         today_demand = demand_df['Market_Demand'].iloc[-1]
         balance = today_supply - today_demand
         today_storage_flow = storage_df['Net_Storage_Flow'].iloc[-1]
         total_storage_volume = storage_df['Total_Volume'].iloc[-1]
+        # NEW: Volatility KPI data
+        current_volatility = volatility_df['Balance_Volatility'].iloc[-1]
         
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # NEW: 6 columns for KPIs
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         
         with col1:
             balance_color = "green" if balance > 0 else "red"
@@ -1105,7 +1210,18 @@ def display_integrated_main_dashboard():
                 <p class="kpi-label">Total Storage Fill</p>
             </div>
             """, unsafe_allow_html=True)
-    
+        
+        # NEW: Volatility KPI
+        with col6:
+            avg_volatility = volatility_df['Balance_Volatility'].tail(90).mean()
+            vol_color = "red" if current_volatility > avg_volatility * 1.1 else "green"
+            st.markdown(f"""
+            <div class="kpi-card">
+                <p class="kpi-value" style="color: {vol_color};">{current_volatility:.1f}</p>
+                <p class="kpi-label">Balance Volatility (30d)</p>
+            </div>
+            """, unsafe_allow_html=True)
+
     st.markdown("---")
     
     # Main integrated content
@@ -1118,8 +1234,9 @@ def display_integrated_main_dashboard():
         # Enhanced controls
         control_col1, control_col2, control_col3 = st.columns(3)
         with control_col1:
+            # NEW: Added Volatility Analysis
             chart_type = st.selectbox("📊 Analysis Type", 
-                                    ["Redesigned Supply vs Demand", "Redesigned Storage Analysis", "Facility Capacity"])
+                                    ["Redesigned Supply vs Demand", "Volume Volatility Analysis", "Redesigned Storage Analysis", "Facility Capacity"])
         with control_col2:
             time_period = st.selectbox("📅 Time Period", 
                                      ["Last 30 Days", "Last 90 Days", "Last 6 Months", "Full Year"], 
@@ -1202,14 +1319,26 @@ def display_integrated_main_dashboard():
                             end_str = constraint['end_date'].strftime('%Y-%m-%d')
                             
                             st.markdown(f"""
-                            **🔧 {constraint['facility']}**  
-                            - **Reduced Capacity:** {constraint['capacity_tj_day']} TJ/day  
+                            **🔧 {constraint['facility']}** - **Reduced Capacity:** {constraint['capacity_tj_day']} TJ/day  
                             - **Period:** {start_str} to {end_str}  
                             - **Reason:** {constraint['description']}
                             """)
             else:
                 st.warning("⚠️ Please select at least one facility for integrated analysis")
         
+        # NEW: Handle Volatility Chart
+        elif chart_type == "Volume Volatility Analysis":
+            fig = create_volume_volatility_chart(volatility_df)
+            st.plotly_chart(fig, use_container_width=True)
+            st.info("""
+            **How to Interpret This Chart:**
+            - **Top Panel:** Shows the daily `Total Supply` and `Market Demand`. Large gaps between these lines indicate a market imbalance.
+            - **Bottom Panel:** Shows the 30-day rolling standard deviation of the Supply/Demand Balance. 
+                - **Rising Volatility (Red Area Increasing):** The market is becoming less predictable and more unstable. This can be caused by frequent unplanned outages or large swings in demand.
+                - **Falling Volatility (Red Area Decreasing):** The market is becoming more stable and predictable.
+            A trader uses this to gauge physical market risk. High volatility signals a greater chance of significant market events.
+            """)
+
         elif chart_type == "Redesigned Storage Analysis":
             # REDESIGNED: Use the completely new safe storage chart function
             fig = create_safe_storage_analysis_chart(storage_df)
@@ -1296,9 +1425,7 @@ def display_integrated_main_dashboard():
             sentiment_icon = {'N': '📰', '+': '📈', '-': '📉'}.get(item['sentiment'], '📰')
             
             st.markdown(f"""
-            **{sentiment_icon} {item['headline']}**  
-            *{item['source']} • {item['timestamp']}*  
-            {item['summary']}
+            **{sentiment_icon} {item['headline']}** *{item['source']} • {item['timestamp']}* {item['summary']}
             """)
             st.markdown("---")
         
@@ -1611,3 +1738,4 @@ if __name__ == "__main__":
         with st.expander("🔍 Debug Information"):
             import traceback
             st.code(traceback.format_exc())
+
