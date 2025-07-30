@@ -1601,3 +1601,13 @@ def main():
 # ==============================================================================
 # RUN THE COMPLETELY REDESIGNED APPLICATION
 # ==============
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"❌ Application Error: {e}")
+        st.markdown("**If errors persist, please check pandas version compatibility.**")
+        with st.expander("🔍 Debug Information"):
+            import traceback
+            st.code(traceback.format_exc())
