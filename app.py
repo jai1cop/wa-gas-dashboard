@@ -661,7 +661,9 @@ def get_integrated_news_feed():
 # ==============================================================================
 
 def create_safe_supply_demand_chart(production_df, demand_df, selected_facilities, show_smoothing=True):
-    """Completely redesigned chart creation - eliminates all datetime arithmetic"""
+    """
+    Chart creation with manual stacking and fixed annotations.
+    """
     
     if not selected_facilities:
         st.warning("⚠️ No facilities selected for chart")
@@ -693,12 +695,22 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
         
         fig = go.Figure()
         
-        cumulative_production = None
+        # FIX: Implement robust manual stacking instead of using stackgroup
+        cumulative_production = pd.Series(0.0, index=chart_data.index)
         
-        for i, facility in enumerate(selected_facilities):
+        # Add a trace for the zero baseline for the first facility to fill to
+        fig.add_trace(go.Scatter(
+            x=chart_data['Date'],
+            y=cumulative_production,
+            mode='none',
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        
+        for facility in selected_facilities:
             if facility in chart_data.columns:
                 config = WA_PRODUCTION_FACILITIES_COMPLETE.get(facility, {})
-                color = config.get('color', f'rgba({50 + i*25}, {100 + i*20}, {150 + i*15}, 0.8)')
+                color = config.get('color', 'rgba(128, 128, 128, 0.8)')
                 operator = config.get('operator', 'Unknown')
                 capacity = config.get('capacity', 0)
                 region = config.get('region', 'Unknown')
@@ -713,50 +725,31 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                         name=f"📦 {facility}",
                         mode='lines',
                         line=dict(color=color, width=2, dash='dot'),
-                        hovertemplate=f'<b>Storage: {facility}</b><br>' +
-                                     f'Operator: {operator}<br>' +
-                                     f'Region: {region}<br>' +
-                                     'Date: %{x|%Y-%m-%d}<br>' +
-                                     'Net Flow: %{y:.1f} TJ/day<br>' +
-                                     f'Max Capacity: {capacity} TJ/day<extra></extra>'
+                        hovertemplate=f'<b>Storage: {facility}</b><br>Operator: {operator}<br>Region: {region}<br>Date: %{{x|%Y-%m-%d}}<br>Net Flow: %{{y:.1f}} TJ/day<br>Max Capacity: {capacity} TJ/day<extra></extra>'
                     ))
                 else:
-                    if cumulative_production is None:
-                        cumulative_production = production_values.copy()
-                    else:
-                        cumulative_production += production_values
-                    
+                    # Manual stacking logic
+                    cumulative_production += production_values
                     fig.add_trace(go.Scatter(
                         x=chart_data['Date'],
                         y=cumulative_production,
                         name=f"🏭 {facility}",
-                        mode='lines',
+                        mode='none', # Use 'none' for area fills
                         fill='tonexty',
                         fillcolor=color,
-                        line=dict(width=0.5, color='white'),
-                        hovertemplate=f'<b>Production: {facility}</b><br>' +
-                                     f'Operator: {operator}<br>' +
-                                     f'Region: {region}<br>' +
-                                     'Date: %{x|%Y-%m-%d}<br>' +
-                                     'Production: %{customdata:.1f} TJ/day<br>' +
-                                     f'Max Capacity: {capacity} TJ/day<extra></extra>',
-                        customdata=production_values,
-                        stackgroup='supply'
+                        hovertemplate=f'<b>Production: {facility}</b><br>Operator: {operator}<br>Region: {region}<br>Date: %{{x|%Y-%m-%d}}<br>Production: %{{customdata:.1f}} TJ/day<br>Max Capacity: {capacity} TJ/day<extra></extra>',
+                        customdata=production_values
                     ))
         
         if 'Market_Demand' in chart_data.columns:
             demand_values = chart_data['Market_Demand'].fillna(0)
-            
             fig.add_trace(go.Scatter(
                 x=chart_data['Date'],
                 y=demand_values,
                 name='📈 Market Demand (5-Year Median)',
                 mode='lines',
                 line=dict(color='#1f2937', width=4),
-                hovertemplate='<b>Market Demand (5-Year Median)</b><br>' +
-                             'Date: %{x|%Y-%m-%d}<br>' +
-                             'Demand: %{y:.1f} TJ/day<br>' +
-                             'Source: 5-Year Historical Analysis<extra></extra>'
+                hovertemplate='<b>Market Demand</b><br>Date: %{x|%Y-%m-%d}<br>Demand: %{y:.1f} TJ/day<extra></extra>'
             ))
         
         capacity_constraints = getattr(production_df, 'attrs', {}).get('capacity_constraints', pd.DataFrame())
@@ -766,35 +759,28 @@ def create_safe_supply_demand_chart(production_df, demand_df, selected_facilitie
                 if constraint['facility'] in selected_facilities:
                     constraint_date = constraint['start_date']
                     if pd.notna(constraint_date):
+                        # FIX: Separate the line from the annotation to avoid the TypeError
+                        # Step 1: Add the line with no text
                         fig.add_vline(
                             x=constraint_date,
                             line_dash="dash",
-                            line_color="red",
-                            annotation_text=f"⚠️ {constraint['facility']}<br>Capacity Reduced",
-                            annotation_position="top"
+                            line_color="red"
+                        )
+                        # Step 2: Add the annotation separately
+                        fig.add_annotation(
+                            x=constraint_date,
+                            y=1.05, # Position annotation at the top of the plot area
+                            yref="paper", # Use paper coordinates for y
+                            text=f"⚠️ {constraint['facility']}<br>Maint.",
+                            showarrow=False,
+                            yshift=10,
+                            font=dict(color="red"),
+                            bgcolor="rgba(255, 255, 255, 0.8)"
                         )
         
         fig.update_layout(
-            title=dict(
-                text='🔧 WA Gas Market Analysis<br><sub>Supply, Demand, and Capacity Constraints</sub>',
-                font=dict(size=20, color='#1f2937'),
-                x=0.02
-            ),
-            xaxis=dict(
-                title='Date',
-                showgrid=True,
-                gridcolor='#f0f0f0',
-                rangeslider=dict(visible=True, bgcolor="rgba(255,255,255,0.8)"),
-                rangeselector=dict(
-                    buttons=list([
-                        dict(count=30, label="30D", step="day", stepmode="backward"),
-                        dict(count=90, label="90D", step="day", stepmode="backward"),
-                        dict(count=180, label="6M", step="day", stepmode="backward"),
-                        dict(step="all", label="All")
-                    ]),
-                    bgcolor="rgba(255,255,255,0.8)"
-                )
-            ),
+            title=dict(text='🔧 WA Gas Market Analysis<br><sub>Supply, Demand, and Capacity Constraints</sub>', font=dict(size=20, color='#1f2937'), x=0.02),
+            xaxis=dict(title='Date', showgrid=True, gridcolor='#f0f0f0', rangeslider=dict(visible=True, bgcolor="rgba(255,255,255,0.8)"), rangeselector=dict(buttons=list([dict(count=30, label="30D", step="day", stepmode="backward"), dict(count=90, label="90D", step="day", stepmode="backward"), dict(count=180, label="6M", step="day", stepmode="backward"), dict(step="all", label="All")]), bgcolor="rgba(255,255,255,0.8)")),
             yaxis=dict(title='Gas Flow (TJ/day)', showgrid=True, gridcolor='#f0f0f0', rangemode='tozero'),
             height=700,
             hovermode='x unified',
